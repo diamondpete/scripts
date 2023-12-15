@@ -1,0 +1,18 @@
+#!/bin/sh
+
+. /usr/local/etc/komga.conf
+
+: "${KOMGA_APP_DIR:=/opt/komga}"
+
+# Update komga
+# If either backup or update fails, an error message will be printed and you will have to exit, ignore SC2015.
+# shellcheck disable=SC2015
+komga-backup && komga-clean-backup && komga-update && komga-clean-jar \
+|| { echo "❌ Komga update failed." >&2 ; exit 1; }
+chown -R komga $KOMGA_APP_DIR
+
+sudo service komga restart
+
+echo "✅ komga update is complete!"
+echo "App dir: $KOMGA_APP_DIR"
+echo "Komga version: $(jq -r '.name' $KOMGA_APP_DIR/release-latest.json)"

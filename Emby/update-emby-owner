@@ -1,0 +1,48 @@
+#!/bin/bash
+
+# Script for changing the UID that Emby Runs As
+# Needs to be run each time the server is updated
+
+uidToRunAs=1000
+serviceName=emby-server
+serviceFile=/usr/lib/systemd/system/$serviceName.service
+newUser=`getent passwd "$uidToRunAs" | cut -d: -f1`
+
+if [ -z $newUser ]
+then
+	echo "User with id $uidToRunAs not found"
+	exit 1
+fi
+
+if ! [ -w $serviceFile ]
+then
+	if [ -r $serviceFile ]
+	then
+		msgText="Not Writable. Are you root?"
+	else
+		msgText="Not Found"
+	fi
+	echo "Service File \"$serviceFile\" $msgText"
+	exit 1
+fi
+
+existingUser=`grep "User=" $serviceFile | cut -d= -f2`
+
+if [ "..$existingUser.." = "..$newUser.." ]
+then
+	echo "\"$serviceName\" already running as \"$newUser\""
+	exit 0
+fi
+
+echo "\"$serviceName\" changing to run as \"$newUser\" (instead of \"$existingUser\")"
+
+string1="User=$existingUser"
+string2="User=$newUser"
+systemctl stop $serviceName
+sed -i "s/$string1/$string2/g" $serviceFile
+
+chown -R $newUser:$newUser /var/lib/emby/
+
+systemctl daemon-reload
+systemctl start $serviceName
+systemctl status $serviceName

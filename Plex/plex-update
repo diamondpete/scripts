@@ -1,0 +1,57 @@
+#!/bin/sh
+
+usage()
+{
+	cat <<EOS >&2
+Usage: $(basename "$0") [OPTIONS]
+  DESCRIPTION
+    Update plex to new version.
+  OPTIONS
+    -v|--version                New version number
+    -h|--help                   Show usage
+  EXAMPLE
+    * Update to Version 1.32.8.7639-fb6452ebf.
+      $ $(basename "$0") -v 1.32.8.7639-fb6452ebf
+EOS
+}
+
+parse_args()
+{
+	while [ $# -gt 0 ];
+	do
+		case $1 in
+			--version|-v)
+				APP_VERSION=$2
+				shift
+			;;
+
+			--help|-h)
+				usage
+				exit 0
+			;;
+
+			*)
+				echo "❌ Invalid option '$1'" >&2
+				usage
+				exit 1
+			;;
+		esac
+		shift
+	done
+}
+
+main()
+{
+	fileName="plexmediaserver_${APP_VERSION}_amd64.deb"
+	FILE=$HOME/$fileName
+	wget "https://downloads.plex.tv/plex-media-server-new/${APP_VERSION}/debian/plexmediaserver_${APP_VERSION}_amd64.deb" -O $FILE || rm $FILE
+
+	if [ -f "$FILE" ]; then
+		sudo dpkg -i $FILE
+
+		rm $FILE
+	fi
+}
+
+parse_args "$@"
+main

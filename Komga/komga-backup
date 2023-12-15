@@ -1,0 +1,117 @@
+#!/bin/sh
+
+usage()
+{
+	cat <<EOS >&2
+Usage: $(basename "$0") [OPTIONS]
+  DESCRIPTION
+    Backup Komga database file.
+    This command depends on a few variables in /usr/local/etc/komga-plugin.conf.
+  OPTIONS
+    -t|--target target_db_file  Target sqlite database file
+                                Default: $KOMGA_APP_DIR/database.sqlite
+    -d|--dest dest_dir          Destination directory
+                                Default: /opt/komga/backup
+    -p|--prefix prefix          Backup file prefix
+                                Default: komga_database_
+    -s|--suffix suffix          Backup file suffix
+                                If the extension of the compression format that can be interpreted
+                                by the tar command is specified, it will be compressed.
+                                Only when '.sqlite' is specified, the archiving process by the tar
+                                command will not be executed.
+                                Default: .sqlite
+    -h|--help                   Show usage
+    --debug                     Execute with debug mode
+  EXAMPLE
+    * Back up to the default application directory.
+      That is, make '/opt/komga/database.sqlite' a '/opt/komga/komga_database_YYYYmmddTHHMMSSTZ.sqlite' backup
+      $ $(basename "$0")
+
+    * Change the destination to '/mnt/backup'.
+      $ $(basename "$0") -d /mnt/backup
+EOS
+}
+
+parse_args()
+{
+	while [ $# -gt 0 ];
+	do
+		case $1 in
+			--debug)
+				set -x
+			;;
+
+			--target|-t)
+				KOMGA_BACKUP_DB_FILE=$2
+				shift
+			;;
+
+			--dest|-d)
+				KOMGA_BACKUP_DEST_DIR=$2
+				shift
+			;;
+
+			--prefix|-p)
+				KOMGA_BACKUP_PREFIX=$2
+				shift
+			;;
+
+			--suffix|-s)
+				KOMGA_BACKUP_SUFFIX=$2
+				shift
+			;;
+
+			--help|-h)
+				usage
+				exit 0
+			;;
+
+			*)
+				echo "❌ Invalid option '$1'" >&2
+				usage
+				exit 1
+			;;
+		esac
+		shift
+	done
+}
+
+init_params()
+{
+	: "${KOMGA_APP_DIR:=/opt/komga}"
+	: "${KOMGA_BACKUP_DB_FILE:=$KOMGA_APP_DIR/database.sqlite}"
+	: "${KOMGA_BACKUP_DEST_DIR:=/opt/komga/backup}"
+	: "${KOMGA_BACKUP_PREFIX:=komga_database_}"
+	: "${KOMGA_BACKUP_SUFFIX:=.sqlite}"
+}
+
+validate_params()
+{
+	if [ ! -f "$KOMGA_BACKUP_DB_FILE" ]; then
+		echo "❌ Source file '$KOMGA_BACKUP_DB_FILE' does not exist or is not a file." >&2
+		exit 1
+	fi
+
+	if [ ! -d "$KOMGA_BACKUP_DEST_DIR" ]; then
+		# If either mkdir or chown fails, an error message will be printed and you will have to exit, ignore SC2015.
+		# shellcheck disable=SC2015
+		mkdir -p $KOMGA_BACKUP_DEST_DIR && chown komga $KOMGA_BACKUP_DEST_DIR || { echo "❌ Komga backup failed." >&2 ; exit 1; }
+	fi
+}
+
+main()
+{
+	archive_filename="${KOMGA_BACKUP_PREFIX}$(date '+%Y%m%dT%H%M%S%z')"
+	sqlite3 "$KOMGA_BACKUP_DB_FILE" ".backup /tmp/$archive_filename.sqlite"
+	if [ "$KOMGA_BACKUP_SUFFIX" = ".sqlite" ]; then
+		mv "/tmp/$archive_filename.sqlite" "$KOMGA_BACKUP_DEST_DIR"
+		return
+	fi
+	tar --cd "/tmp" -acf "$KOMGA_BACKUP_DEST_DIR/$archive_filename$KOMGA_BACKUP_SUFFIX" "$archive_filename.sqlite"
+}
+
+. /usr/local/etc/komga.conf
+parse_args "$@"
+init_params
+validate_params
+main

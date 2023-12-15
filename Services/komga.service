@@ -1,0 +1,19 @@
+[Unit]
+Description=Komga Daemon
+After=syslog.target network.target
+
+[Service]
+User=komga
+Group=komga
+Type=simple
+
+Environment=LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/usr/lib/x86_64-linux-gnu
+
+ExecStart=/usr/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -jar /opt/komga/komga-latest.jar --komga.config-dir="/opt/komga/"
+
+TimeoutStopSec=20
+KillMode=process
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

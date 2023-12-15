@@ -1,0 +1,59 @@
+#!/bin/sh
+
+usage()
+{
+	cat <<EOS >&2
+Usage: $(basename "$0") [OPTIONS]
+  DESCRIPTION
+    Update emby to new version.
+  OPTIONS
+    -v|--version                New version number
+    -h|--help                   Show usage
+  EXAMPLE
+    * Update to version '4.8.0.62'.
+      $ $(basename "$0") -v 4.8.0.62
+EOS
+}
+
+parse_args()
+{
+	while [ $# -gt 0 ];
+	do
+		case $1 in
+			--version|-v)
+				EMBY_VERSION=$2
+				shift
+			;;
+
+			--help|-h)
+				usage
+				exit 0
+			;;
+
+			*)
+				echo "❌ Invalid option '$1'" >&2
+				usage
+				exit 1
+			;;
+		esac
+		shift
+	done
+}
+
+main()
+{
+	fileName="emby-server-deb_${EMBY_VERSION}_amd64.deb"
+	FILE=$HOME/$fileName
+	wget "https://github.com/MediaBrowser/Emby.Releases/releases/download/${EMBY_VERSION}/$fileName" -O $FILE || rm $FILE
+
+	if [ -f "$FILE" ]; then
+		sudo dpkg -i $FILE
+		sudo update-emby-owner
+		sudo systemctl restart emby-server.service
+
+		rm $FILE
+	fi
+}
+
+parse_args "$@"
+main
