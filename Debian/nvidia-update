@@ -1,0 +1,21 @@
+#!/bin/sh
+
+LOCAL_VERSION=`nvidia-smi --version | awk 'NR==1{print $4}'`
+wget -qO "latest.txt" https://download.nvidia.com/XFree86/Linux-x86_64/latest.txt || { echo "❌ NVIDIA release info fetch failed." >&2 ; exit 1; }
+REMOTE_VERSION=`cat latest.txt | awk '{print $1}'`
+REMOTE_PATH=`cat latest.txt | awk '{print "https://download.nvidia.com/XFree86/Linux-x86_64/"$2}'`
+
+verlte() {
+    [  "$1" = "`echo -e "$1\n$2" | sort -V | head -n1`" ]
+}
+
+compare=$(verlte $LOCAL_VERSION $REMOTE_VERSION)
+
+if [ $compare ]; then
+	echo "Updating NVIDIA Drivers"
+	wget -q $REMOTE_PATH
+	sudo sh ./NVIDIA-Linux-x86_64-$REMOTE_VERSION.run --dkms --module-signing-secret-key=<path-to-keystore>/Nvidia.key --module-signing-public-key=<path-to-keystore>/Nvidia.der
+else
+	echo "Drivers Up-to-Date"
+fi
+
