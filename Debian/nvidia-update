@@ -6,16 +6,24 @@ REMOTE_VERSION=`cat latest.txt | awk '{print $1}'`
 REMOTE_PATH=`cat latest.txt | awk '{print "https://download.nvidia.com/XFree86/Linux-x86_64/"$2}'`
 
 verlte() {
-    [  "$1" = "`echo -e "$1\n$2" | sort -V | head -n1`" ]
+	printf '%s\n' "$1" "$2" | sort -C -V
 }
 
-compare=$(verlte $LOCAL_VERSION $REMOTE_VERSION)
+verlt() {
+	! verlte "$2" "$1"
+}
 
-if [ $compare ]; then
+if verlt $LOCAL_VERSION $REMOTE_VERSION; then
 	echo "Updating NVIDIA Drivers"
 	wget -q $REMOTE_PATH
 	sudo sh ./NVIDIA-Linux-x86_64-$REMOTE_VERSION.run --dkms --module-signing-secret-key=<path-to-keystore>/Nvidia.key --module-signing-public-key=<path-to-keystore>/Nvidia.der
+
+	# Remove Previous Driver
+	# Keeping Latest for Kernel Changes Requiring Reinstall
+	rm "NVIDIA-Linux-x86_64-$LOCAL_VERSION.run"
 else
 	echo "Drivers Up-to-Date"
 fi
 
+# Cleanup
+rm "latest.txt"
