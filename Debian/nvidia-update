@@ -16,6 +16,11 @@ verlt() {
 if verlt $LOCAL_VERSION $REMOTE_VERSION; then
 	echo "Updating NVIDIA Drivers"
 	wget -q $REMOTE_PATH
+
+	# Creating and Importing Keys:
+	# openssl req -new -x509 -newkey rsa:2048 -keyout <path-to-keystore>/Nvidia.key -outform DER -out <path-to-keystore>/Nvidia.der -nodes -days 36500 -subj "/CN=Graphics Drivers"
+	# sudo mokutil --import <path-to-keystore>/Nvidia.der
+	# echo options nouveau modeset=0 | sudo tee -a /etc/modprobe.d/nouveau-kms.conf; sudo update-initramfs -u
 	sudo sh ./NVIDIA-Linux-x86_64-$REMOTE_VERSION.run --dkms --module-signing-secret-key=<path-to-keystore>/Nvidia.key --module-signing-public-key=<path-to-keystore>/Nvidia.der
 
 	# Remove Previous Driver
