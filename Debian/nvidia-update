@@ -1,9 +1,43 @@
 #!/bin/sh
 
-LOCAL_VERSION=`nvidia-smi --version | awk 'NR==1{print $4}'`
-wget -qO "latest.txt" https://download.nvidia.com/XFree86/Linux-x86_64/latest.txt || { echo "❌ NVIDIA release info fetch failed." >&2 ; exit 1; }
-REMOTE_VERSION=`cat latest.txt | awk '{print $1}'`
-REMOTE_PATH=`cat latest.txt | awk '{print "https://download.nvidia.com/XFree86/Linux-x86_64/"$2}'`
+usage()
+{
+        cat <<EOS >&2
+Usage: $(basename "$0") [OPTIONS]
+  DESCRIPTION
+    Update or reinstall nvidia drivers
+  OPTIONS
+    -r|--reinstall              Reinstall current driver
+    -h|--help                   Show usage
+  EXAMPLE
+    * Reinstall current driver if newer version not available
+      $ $(basename "$0") -r
+EOS
+}
+
+parse_args()
+{
+	while [ $# -gt 0 ];
+		do
+			case $1 in
+			--reinstall|-r)
+				REINSTALL=true
+			;;
+
+			--help|-h)
+				usage
+				exit 0
+			;;
+
+			*)
+				echo "❌ Invalid option '$1'" >&2
+				usage
+				exit 1
+			;;
+		esac
+		shift
+	done
+}
 
 verlte() {
 	printf '%s\n' "$1" "$2" | sort -C -V
@@ -13,22 +47,37 @@ verlt() {
 	! verlte "$2" "$1"
 }
 
-if verlt $LOCAL_VERSION $REMOTE_VERSION; then
-	echo "Updating NVIDIA Drivers"
-	wget -q $REMOTE_PATH
+main() {
+	LOCAL_VERSION=`nvidia-smi --version | awk 'NR==1{print $4}'`
+	wget -qO "latest.txt" https://download.nvidia.com/XFree86/Linux-x86_64/latest.txt || { echo "❌ NVIDIA release info fetch failed." >&2 ; exit 1; }
+	REMOTE_VERSION=`cat latest.txt | awk '{print $1}'`
+	REMOTE_PATH=`cat latest.txt | awk '{print "https://download.nvidia.com/XFree86/Linux-x86_64/"$2}'`
 
-	# Creating and Importing Keys:
-	# openssl req -new -x509 -newkey rsa:2048 -keyout <path-to-keystore>/Nvidia.key -outform DER -out <path-to-keystore>/Nvidia.der -nodes -days 36500 -subj "/CN=Graphics Drivers"
-	# sudo mokutil --import <path-to-keystore>/Nvidia.der
-	# echo options nouveau modeset=0 | sudo tee -a /etc/modprobe.d/nouveau-kms.conf; sudo update-initramfs -u
-	sudo sh ./NVIDIA-Linux-x86_64-$REMOTE_VERSION.run --dkms --module-signing-secret-key=<path-to-keystore>/Nvidia.key --module-signing-public-key=<path-to-keystore>/Nvidia.der
+	if verlt $LOCAL_VERSION $REMOTE_VERSION; then
+		echo "Updating NVIDIA Drivers"
+		wget -q $REMOTE_PATH
 
-	# Remove Previous Driver
-	# Keeping Latest for Kernel Changes Requiring Reinstall
-	rm "NVIDIA-Linux-x86_64-$LOCAL_VERSION.run"
-else
-	echo "Drivers Up-to-Date"
-fi
+		# Creating and Importing Keys:
+		# openssl req -new -x509 -newkey rsa:2048 -keyout <path-to-keystore>/Nvidia.key -outform DER -out <path-to-keystore>/Nvidia.der -nodes -days 36500 -subj "/CN=Graphics Drivers"
+		# sudo mokutil --import <path-to-keystore>/Nvidia.der
+		# echo options nouveau modeset=0 | sudo tee -a /etc/modprobe.d/nouveau-kms.conf; sudo update-initramfs -u
+		sudo sh ./NVIDIA-Linux-x86_64-$REMOTE_VERSION.run --dkms --module-signing-secret-key=<path-to-keystore>/Nvidia.key --module-signing-public-key=<path-to-keystore>/Nvidia.der
 
-# Cleanup
-rm "latest.txt"
+		# Remove Previous Driver
+		# Keeping Latest for Kernel Changes Requiring Reinstall
+		rm "NVIDIA-Linux-x86_64-$LOCAL_VERSION.run"
+	else
+		echo "Drivers Up-to-Date"
+		if $REINSTALL; then
+			echo "Reinstalling Drivers"
+			sudo sh ./NVIDIA-Linux-x86_64-$LOCAL_VERSION.run --dkms --module-signing-secret-key=<path-to-keystore>/Nvidia.key --module-signing-public-key=<path-to-keystore>/Nvidia.der
+		fi
+	fi
+
+	# Cleanup
+	rm "latest.txt"
+}
+
+REINSTALL=false
+parse_args "$@"
+main
