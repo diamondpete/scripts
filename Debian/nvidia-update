@@ -7,7 +7,8 @@ Usage: $(basename "$0") [OPTIONS]
   DESCRIPTION
     Update or reinstall nvidia drivers
   OPTIONS
-    -r|--reinstall              Reinstall current driver
+    -r|--reinstall              Reinstall current driver after kernel update
+    -v|--version		Specify a target version
     -h|--help                   Show usage
   EXAMPLE
     * Reinstall current driver if newer version not available
@@ -23,12 +24,14 @@ parse_args()
 			--reinstall|-r)
 				REINSTALL=true
 			;;
-
 			--help|-h)
 				usage
 				exit 0
 			;;
-
+			--version|-v)
+				: "${REMOTE_VERSION:=$2}"
+				shift
+			;;
 			*)
 				echo "❌ Invalid option '$1'" >&2
 				usage
@@ -50,8 +53,8 @@ verlt() {
 main() {
 	LOCAL_VERSION=`nvidia-smi --version | awk 'NR==1{print $4}'`
 	wget -qO "latest.txt" https://download.nvidia.com/XFree86/Linux-x86_64/latest.txt || { echo "❌ NVIDIA release info fetch failed." >&2 ; exit 1; }
-	REMOTE_VERSION=`cat latest.txt | awk '{print $1}'`
-	REMOTE_PATH=`cat latest.txt | awk '{print "https://download.nvidia.com/XFree86/Linux-x86_64/"$2}'`
+	: "${REMOTE_VERSION:=`cat latest.txt | awk '{print $1}'`}"
+	REMOTE_PATH="https://download.nvidia.com/XFree86/Linux-x86_64/$REMOTE_VERSION/NVIDIA-Linux-x86_64-$REMOTE_VERSION.run"
 
 	if verlt $LOCAL_VERSION $REMOTE_VERSION; then
 		echo "Updating NVIDIA Drivers"
@@ -70,7 +73,11 @@ main() {
 		echo "Drivers Up-to-Date"
 		if $REINSTALL; then
 			echo "Reinstalling Drivers"
-			sudo sh ./NVIDIA-Linux-x86_64-$LOCAL_VERSION.run --dkms --module-signing-secret-key=<path-to-keystore>/Nvidia.key --module-signing-public-key=<path-to-keystore>/Nvidia.der
+			if verlt $REMOTE_VERSION $LOCAL_VERSION; then
+				sudo sh ./NVIDIA-Linux-x86_64-$LOCAL_VERSION.run --dkms --module-signing-secret-key=<path-to-keystore>/Nvidia.key --module-signing-public-key=<path-to-keystore>/Nvidia.der
+			else
+				sudo sh ./NVIDIA-Linux-x86_64-$REMOTE_VERSION.run --dkms --module-signing-secret-key=<path-to-keystore>/Nvidia.key --module-signing-public-key=<path-to-keystore>/Nvidia.der
+			fi
 		fi
 	fi
 
@@ -81,3 +88,5 @@ main() {
 REINSTALL=false
 parse_args "$@"
 main
+nvidia-smi
+
