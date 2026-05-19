@@ -60,10 +60,26 @@ main() {
 		echo "Updating NVIDIA Drivers"
 		wget -q $REMOTE_PATH
 
-		# Creating and Importing Keys:
+		# ==Creating and Importing Keys==
 		# openssl req -new -x509 -newkey rsa:2048 -keyout <path-to-keystore>/Nvidia.key -outform DER -out <path-to-keystore>/Nvidia.der -nodes -days 36500 -subj "/CN=Graphics Drivers"
 		# sudo mokutil --import <path-to-keystore>/Nvidia.der
 		# echo options nouveau modeset=0 | sudo tee -a /etc/modprobe.d/nouveau-kms.conf; sudo update-initramfs -u
+		# ==Blacklist NovaCore==
+		# sudo tee /etc/modprobe.d/blacklist-nova.conf <<'EOF'
+		# blacklist nova_core
+		# blacklist nova-core
+		# blacklist nova_drm
+		# EOF
+		# ==Blacklist NovaCore/nouveau in kernel==
+		# sudo tee /etc/modprobe.d/nova-blacklist.conf <<'EOF'
+		# blacklist nova_core
+		# install nova_core /bin/true
+		# install nova_drm /bin/true
+		# blacklist nouveau
+		# install nouveau /bin/true
+		# options nouveau modeset=0
+		# EOF
+		# sudo update-initramfs -u
 		sudo sh ./NVIDIA-Linux-x86_64-$REMOTE_VERSION.run --dkms --module-signing-secret-key=<path-to-keystore>/Nvidia.key --module-signing-public-key=<path-to-keystore>/Nvidia.der
 
 		# Remove Previous Driver
