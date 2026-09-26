@@ -1,0 +1,112 @@
+#!/bin/sh
+
+###
+### Settings
+###
+PATH_PORTLIST="/usr/local/etc/poudriere.d/port-list"
+REPOS="HEAD overlay"
+BIN_POUDRIERE="/usr/local/bin/poudriere"
+BIN_PATCH="/usr/bin/patch"
+BIN_GIT="/usr/local/bin/git"
+BIN_FIND="/usr/bin/find"
+BIN_XARGS="/usr/bin/xargs"
+
+###
+### Parameters
+###
+JAIL=$1
+OVERLAY="overlay"
+
+#####################################################################
+### Don't change stuff below here unless you know what you're doing #
+#####################################################################
+
+#
+# Don't run this script more than once at a time.
+#
+SCRIPTNAME=`basename "$0"`
+
+# Check for running script
+STATUS=`ps -ax | grep "$SCRIPTNAME" | grep -v grep | wc -l`
+
+# Compare the two because ` creates a sub-process
+if [ "$STATUS" -gt 2 ]; then
+	echo "already running."
+	exit 0
+fi
+
+#
+# Clean ports function
+#
+clean_ports() {
+	echo "[$SCRIPTNAME] Cleaning ports tree... $1"
+	(cd "/usr/local/poudriere/ports/$1" && $BIN_GIT fetch origin && $BIN_GIT reset --hard origin/main)
+}
+
+#
+# Patch function
+#
+patch_ports() {
+	find "/usr/local/poudriere/ports/$1" -type f -name 'patch*' -maxdepth 1 -print0 | xargs -0 -n 1 sh -c 'patch --posix -EfN < "$1"' -- {}
+}
+
+#
+# Build function
+#
+poudriere_build() {
+	for REPO in $REPOS; do
+		# if [ "$REPO" = "2026Q1" ]; then
+		# 	PATH_PORTLIST="/usr/local/etc/poudriere.d/port-list-quarterly"
+		# fi
+
+		# if [ "$REPO" = "2026Q2" ]; then
+		# 	sed -i.bak "s/python=3\.14/python=3.12/" /usr/local/etc/poudriere.d/make.conf
+		# else
+		# 	sed -i.bak "s/python=3\.12/python=3.14/" /usr/local/etc/poudriere.d/make.conf
+		# fi
+
+		case "$REPO" in
+			overlay*)
+				;;
+			*)
+				$BIN_POUDRIERE bulk -j "$JAIL" -p "$REPO" -O "$OVERLAY" -f $PATH_PORTLIST
+				;;
+		esac
+	done
+}
+
+#
+# Update repos function
+#
+repos_update() {
+	echo "repos: $REPOS"
+	for REPO in $REPOS; do
+		echo "repo: $REPO"
+		echo "[$SCRIPTNAME] Updating ports tree... $REPO"
+
+		clean_ports $REPO
+
+		$BIN_POUDRIERE ports -p "$REPO" -u
+
+		if [ $? -ne 0 ]; then
+			echo "    Error updating ports tree."
+			exit 1
+		fi
+
+		patch_ports $REPO
+	done
+}
+
+#
+# Script main stuff
+#
+echo "updating repositories..."
+repos_update
+
+echo "starting build..."
+poudriere_build
+
+echo "cleaning distfiles..."
+#$BIN_POUDRIERE distclean -p "$REPOS" -f "$PORTLIST" -y
+
+exit 0
