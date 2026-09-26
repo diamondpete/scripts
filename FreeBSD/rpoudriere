@@ -1,112 +1,116 @@
 #!/bin/sh
+# Update every poudriere ports tree, reapply the local patches kept at its root,
+# then bulk build the port list against each tree.
+set -u
 
 ###
 ### Settings
 ###
 PATH_PORTLIST="/usr/local/etc/poudriere.d/port-list"
-REPOS="HEAD overlay"
+PATH_PORTS="/usr/local/poudriere/ports"
+TREES="HEAD overlay"
+OVERLAY="overlay"
+LOCKFILE="/var/run/rpoudriere.lock"
+
 BIN_POUDRIERE="/usr/local/bin/poudriere"
 BIN_PATCH="/usr/bin/patch"
 BIN_GIT="/usr/local/bin/git"
-BIN_FIND="/usr/bin/find"
-BIN_XARGS="/usr/bin/xargs"
-
-###
-### Parameters
-###
-JAIL=$1
-OVERLAY="overlay"
+BIN_LOCKF="/usr/bin/lockf"
 
 #####################################################################
 ### Don't change stuff below here unless you know what you're doing #
 #####################################################################
 
-#
-# Don't run this script more than once at a time.
-#
-SCRIPTNAME=`basename "$0"`
+SCRIPTNAME=${0##*/}
 
-# Check for running script
-STATUS=`ps -ax | grep "$SCRIPTNAME" | grep -v grep | wc -l`
+log() {
+	echo "[$SCRIPTNAME] $*"
+}
 
-# Compare the two because ` creates a sub-process
-if [ "$STATUS" -gt 2 ]; then
-	echo "already running."
-	exit 0
+die() {
+	echo "$SCRIPTNAME: $*" >&2
+	exit 1
+}
+
+#
+# Don't run this script more than once at a time.  lockf holds the lock for as
+# long as the re-executed script runs and drops it however that script dies,
+# neither of which a ps(1) scan can do.
+#
+if [ "${RPOUDRIERE_LOCKED-}" != yes ]; then
+	RPOUDRIERE_LOCKED=yes
+	export RPOUDRIERE_LOCKED
+	"$BIN_LOCKF" -t 0 "$LOCKFILE" "$0" "$@"
+	status=$?
+	[ ${status} -eq 75 ] && die "already running"
+	exit ${status}
 fi
 
+###
+### Parameters
+###
+[ $# -eq 1 ] || die "usage: ${SCRIPTNAME} <jail>"
+JAIL=$1
+
 #
-# Clean ports function
+# Reset a tree to its upstream branch, discarding the patches the last run
+# applied.  The cd runs in a subshell: /usr/bin/cd exits 0 without changing this
+# script's directory, so git would otherwise run wherever the caller stood.
 #
-clean_ports() {
-	echo "[$SCRIPTNAME] Cleaning ports tree... $1"
-	(cd "/usr/local/poudriere/ports/$1" && $BIN_GIT fetch origin && $BIN_GIT reset --hard origin/main)
+clean_tree() {
+	log "Cleaning ports tree... $1"
+	(cd "${PATH_PORTS}/$1" && $BIN_GIT fetch origin && $BIN_GIT reset --hard origin/main) ||
+		die "could not reset $1"
 }
 
 #
-# Patch function
+# Apply every patch kept at the root of a tree.  patch(1) resolves the paths in
+# a diff against its working directory, so it runs inside the tree.
 #
-patch_ports() {
-	find "/usr/local/poudriere/ports/$1" -type f -name 'patch*' -maxdepth 1 -print0 | xargs -0 -n 1 sh -c 'patch --posix -EfN < "$1"' -- {}
+patch_tree() {
+	log "Patching ports tree... $1"
+	for diff in "${PATH_PORTS}/$1"/patch*; do
+		[ -f "${diff}" ] || continue
+		(cd "${PATH_PORTS}/$1" && $BIN_PATCH --posix -EfN < "${diff}") ||
+			log "  FAILED: ${diff##*/}"
+	done
 }
 
 #
-# Build function
+# Update every tree, then reapply its patches.
+#
+trees_update() {
+	for tree in ${TREES}; do
+		[ -d "${PATH_PORTS}/${tree}" ] || die "no such ports tree: ${tree}"
+
+		log "Updating ports tree... ${tree}"
+		clean_tree "${tree}"
+		$BIN_POUDRIERE ports -p "${tree}" -u || die "could not update ${tree}"
+		patch_tree "${tree}"
+	done
+}
+
+#
+# Build the port list against every tree except the overlay, which is mounted
+# into each of those builds with -O instead of being built on its own.
 #
 poudriere_build() {
-	for REPO in $REPOS; do
-		# if [ "$REPO" = "2026Q1" ]; then
-		# 	PATH_PORTLIST="/usr/local/etc/poudriere.d/port-list-quarterly"
-		# fi
+	status=0
 
-		# if [ "$REPO" = "2026Q2" ]; then
-		# 	sed -i.bak "s/python=3\.14/python=3.12/" /usr/local/etc/poudriere.d/make.conf
-		# else
-		# 	sed -i.bak "s/python=3\.12/python=3.14/" /usr/local/etc/poudriere.d/make.conf
-		# fi
+	for tree in ${TREES}; do
+		[ "${tree}" = "${OVERLAY}" ] && continue
 
-		case "$REPO" in
-			overlay*)
-				;;
-			*)
-				$BIN_POUDRIERE bulk -j "$JAIL" -p "$REPO" -O "$OVERLAY" -f $PATH_PORTLIST
-				;;
-		esac
+		log "Building... ${tree}"
+		$BIN_POUDRIERE bulk -j "${JAIL}" -p "${tree}" -O "${OVERLAY}" \
+			-f "${PATH_PORTLIST}" || status=1
 	done
-}
 
-#
-# Update repos function
-#
-repos_update() {
-	echo "repos: $REPOS"
-	for REPO in $REPOS; do
-		echo "repo: $REPO"
-		echo "[$SCRIPTNAME] Updating ports tree... $REPO"
-
-		clean_ports $REPO
-
-		$BIN_POUDRIERE ports -p "$REPO" -u
-
-		if [ $? -ne 0 ]; then
-			echo "    Error updating ports tree."
-			exit 1
-		fi
-
-		patch_ports $REPO
-	done
+	return ${status}
 }
 
 #
 # Script main stuff
 #
-echo "updating repositories..."
-repos_update
-
-echo "starting build..."
+log "trees: ${TREES}"
+trees_update
 poudriere_build
-
-echo "cleaning distfiles..."
-#$BIN_POUDRIERE distclean -p "$REPOS" -f "$PORTLIST" -y
-
-exit 0
