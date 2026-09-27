@@ -1,26 +1,33 @@
 #!/bin/sh
 
+# Directory holding the MOK signing key pair (Nvidia.key / Nvidia.der).
+# See "Creating and Importing Keys" in install_driver() for how to generate it.
+KEYSTORE="<path-to-keystore>"
+
+BASE_URL="https://download.nvidia.com/XFree86/Linux-x86_64"
+
 usage()
 {
-        cat <<EOS >&2
+	cat <<EOS >&2
 Usage: $(basename "$0") [OPTIONS]
   DESCRIPTION
     Update or reinstall nvidia drivers
   OPTIONS
     -r|--reinstall              Reinstall current driver after kernel update
-    -v|--version		Specify a target version
+    -v|--version <VERSION>      Install a specific version (skips the installed version check)
     -h|--help                   Show usage
   EXAMPLE
     * Reinstall current driver if newer version not available
       $ $(basename "$0") -r
+    * Install a specific driver version
+      $ $(basename "$0") -v 580.95.05
 EOS
 }
 
 parse_args()
 {
-	while [ $# -gt 0 ];
-		do
-			case $1 in
+	while [ $# -gt 0 ]; do
+		case $1 in
 			--reinstall|-r)
 				REINSTALL=true
 			;;
@@ -29,7 +36,12 @@ parse_args()
 				exit 0
 			;;
 			--version|-v)
-				: "${REMOTE_VERSION:=$2}"
+				if [ -z "$2" ]; then
+					echo "❌ Option '$1' requires a version argument" >&2
+					usage
+					exit 1
+				fi
+				TARGET_VERSION=$2
 				shift
 			;;
 			*)
@@ -40,69 +52,116 @@ parse_args()
 		esac
 		shift
 	done
+
+	if [ -n "$TARGET_VERSION" ] && ! echo "$TARGET_VERSION" | grep -Eq '^[0-9]+(\.[0-9]+)+$'; then
+		echo "❌ Invalid version '$TARGET_VERSION'" >&2
+		exit 1
+	fi
 }
 
+# True if $1 <= $2 (version comparison)
 verlte() {
 	printf '%s\n' "$1" "$2" | sort -C -V
 }
 
+# True if $1 < $2 (version comparison)
 verlt() {
 	! verlte "$2" "$1"
 }
 
-main() {
-	LOCAL_VERSION=`nvidia-smi --version | awk 'NR==1{print $4}'`
-	wget -qO "latest.txt" https://download.nvidia.com/XFree86/Linux-x86_64/latest.txt || { echo "❌ NVIDIA release info fetch failed." >&2 ; exit 1; }
-	: "${REMOTE_VERSION:=`cat latest.txt | awk '{print $1}'`}"
-	REMOTE_PATH="https://download.nvidia.com/XFree86/Linux-x86_64/$REMOTE_VERSION/NVIDIA-Linux-x86_64-$REMOTE_VERSION.run"
+# Print the installed driver version, or nothing if nvidia-smi is missing or
+# cannot talk to the driver (e.g. module not built for the running kernel).
+local_version() {
+	command -v nvidia-smi >/dev/null 2>&1 || return 0
+	nvidia-smi --version 2>/dev/null | awk 'NR==1 && $4 ~ /^[0-9]+(\.[0-9]+)+$/ {print $4}'
+}
 
-	if verlt $LOCAL_VERSION $REMOTE_VERSION; then
-		echo "Updating NVIDIA Drivers"
-		wget -q $REMOTE_PATH
+# Print the latest driver version published by NVIDIA
+remote_version() {
+	wget -qO- "$BASE_URL/latest.txt" | awk 'NR==1{print $1}'
+}
 
-		# ==Creating and Importing Keys==
-		# openssl req -new -x509 -newkey rsa:2048 -keyout <path-to-keystore>/Nvidia.key -outform DER -out <path-to-keystore>/Nvidia.der -nodes -days 36500 -subj "/CN=Graphics Drivers"
-		# sudo mokutil --import <path-to-keystore>/Nvidia.der
-		# echo options nouveau modeset=0 | sudo tee -a /etc/modprobe.d/nouveau-kms.conf; sudo update-initramfs -u
-		# ==Blacklist NovaCore==
-		# sudo tee /etc/modprobe.d/blacklist-nova.conf <<'EOF'
-		# blacklist nova_core
-		# blacklist nova-core
-		# blacklist nova_drm
-		# EOF
-		# ==Blacklist NovaCore/nouveau in kernel==
-		# sudo tee /etc/modprobe.d/nova-blacklist.conf <<'EOF'
-		# blacklist nova_core
-		# install nova_core /bin/true
-		# install nova_drm /bin/true
-		# blacklist nouveau
-		# install nouveau /bin/true
-		# options nouveau modeset=0
-		# EOF
-		# sudo update-initramfs -u
-		sudo sh ./NVIDIA-Linux-x86_64-$REMOTE_VERSION.run --dkms --module-signing-secret-key=<path-to-keystore>/Nvidia.key --module-signing-public-key=<path-to-keystore>/Nvidia.der
+run_file() {
+	echo "NVIDIA-Linux-x86_64-$1.run"
+}
 
-		# Remove Previous Driver
-		# Keeping Latest for Kernel Changes Requiring Reinstall
-		rm "NVIDIA-Linux-x86_64-$LOCAL_VERSION.run"
-	else
-		echo "Drivers Up-to-Date"
-		if $REINSTALL; then
-			echo "Reinstalling Drivers"
-			if verlt $REMOTE_VERSION $LOCAL_VERSION; then
-				sudo sh ./NVIDIA-Linux-x86_64-$LOCAL_VERSION.run --dkms --module-signing-secret-key=<path-to-keystore>/Nvidia.key --module-signing-public-key=<path-to-keystore>/Nvidia.der
-			else
-				sudo sh ./NVIDIA-Linux-x86_64-$REMOTE_VERSION.run --dkms --module-signing-secret-key=<path-to-keystore>/Nvidia.key --module-signing-public-key=<path-to-keystore>/Nvidia.der
-			fi
-		fi
+# Download (if not already present) and install driver version $1
+install_driver() {
+	file=$(run_file "$1")
+
+	if [ ! -f "$file" ]; then
+		echo "Downloading $file"
+		wget -q "$BASE_URL/$1/$file" || { echo "❌ Download of $file failed." >&2; rm -f "$file"; exit 1; }
 	fi
 
-	# Cleanup
-	rm "latest.txt"
+	# ==Creating and Importing Keys==
+	# openssl req -new -x509 -newkey rsa:2048 -keyout <path-to-keystore>/Nvidia.key -outform DER -out <path-to-keystore>/Nvidia.der -nodes -days 36500 -subj "/CN=Graphics Drivers"
+	# sudo mokutil --import <path-to-keystore>/Nvidia.der
+	# echo options nouveau modeset=0 | sudo tee -a /etc/modprobe.d/nouveau-kms.conf; sudo update-initramfs -u
+	# ==Blacklist NovaCore==
+	# sudo tee /etc/modprobe.d/blacklist-nova.conf <<'EOF'
+	# blacklist nova_core
+	# blacklist nova-core
+	# blacklist nova_drm
+	# EOF
+	# ==Blacklist NovaCore/nouveau in kernel==
+	# sudo tee /etc/modprobe.d/nova-blacklist.conf <<'EOF'
+	# blacklist nova_core
+	# install nova_core /bin/true
+	# install nova_drm /bin/true
+	# blacklist nouveau
+	# install nouveau /bin/true
+	# options nouveau modeset=0
+	# EOF
+	# sudo update-initramfs -u
+	sudo sh "./$file" --dkms \
+		--module-signing-secret-key="$KEYSTORE/Nvidia.key" \
+		--module-signing-public-key="$KEYSTORE/Nvidia.der" \
+		|| { echo "❌ Installation of $1 failed." >&2; exit 1; }
+}
+
+# Remove the installer for the previous driver ($1) once $2 is installed.
+# The installer for the current driver is kept for kernel changes requiring a reinstall.
+remove_previous() {
+	if [ -n "$1" ] && [ "$1" != "$2" ]; then
+		rm -f "$(run_file "$1")"
+	fi
+}
+
+main() {
+	LOCAL_VERSION=$(local_version)
+
+	# Explicit version requested: install it without comparing against the
+	# installed driver (nvidia-smi may not work, e.g. after a kernel update)
+	if [ -n "$TARGET_VERSION" ]; then
+		echo "Installing NVIDIA Drivers $TARGET_VERSION"
+		install_driver "$TARGET_VERSION"
+		remove_previous "$LOCAL_VERSION" "$TARGET_VERSION"
+		return
+	fi
+
+	REMOTE_VERSION=$(remote_version)
+	[ -n "$REMOTE_VERSION" ] || { echo "❌ NVIDIA release info fetch failed." >&2; exit 1; }
+
+	if [ -z "$LOCAL_VERSION" ]; then
+		echo "⚠️  Unable to detect installed driver, installing $REMOTE_VERSION"
+		install_driver "$REMOTE_VERSION"
+	elif verlt "$LOCAL_VERSION" "$REMOTE_VERSION"; then
+		echo "Updating NVIDIA Drivers $LOCAL_VERSION -> $REMOTE_VERSION"
+		install_driver "$REMOTE_VERSION"
+		remove_previous "$LOCAL_VERSION" "$REMOTE_VERSION"
+	else
+		echo "Drivers Up-to-Date ($LOCAL_VERSION)"
+		if $REINSTALL; then
+			# Installed driver may be newer than latest.txt (e.g. installed with -v)
+			echo "Reinstalling NVIDIA Drivers $LOCAL_VERSION"
+			install_driver "$LOCAL_VERSION"
+		fi
+	fi
 }
 
 REINSTALL=false
+TARGET_VERSION=
 parse_args "$@"
 main
 nvidia-smi
-
