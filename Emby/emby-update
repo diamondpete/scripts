@@ -5,11 +5,15 @@ usage()
 	cat <<EOS >&2
 Usage: $(basename "$0") [OPTIONS]
   DESCRIPTION
-    Update emby to new version.
+    Update emby to a new version.
+    Without -v, the latest stable release on GitHub is installed.
   OPTIONS
-    -v|--version                New version number
+    -v|--version <VERSION>      Install a specific version
+    -f|--force                  Reinstall even if the version is already installed
     -h|--help                   Show usage
   EXAMPLE
+    * Update to the latest stable version.
+      $ $(basename "$0")
     * Update to version '4.8.0.62'.
       $ $(basename "$0") -v 4.8.0.62
 EOS
@@ -21,8 +25,17 @@ parse_args()
 	do
 		case $1 in
 			--version|-v)
+				if [ -z "$2" ]; then
+					echo "❌ Option '$1' requires a version argument" >&2
+					usage
+					exit 1
+				fi
 				EMBY_VERSION=$2
 				shift
+			;;
+
+			--force|-f)
+				FORCE=true
 			;;
 
 			--help|-h)
@@ -40,20 +53,45 @@ parse_args()
 	done
 }
 
-main()
+# Print the tag of the latest stable (non-prerelease) Emby release
+latest_version()
 {
-	fileName="emby-server-deb_${EMBY_VERSION}_amd64.deb"
-	FILE=$HOME/$fileName
-	wget "https://github.com/MediaBrowser/Emby.Releases/releases/download/${EMBY_VERSION}/$fileName" -O $FILE || rm $FILE
-
-	if [ -f "$FILE" ]; then
-		sudo dpkg -i $FILE
-		sudo update-emby-owner
-		sudo systemctl restart emby-server.service
-
-		rm $FILE
-	fi
+	wget -qO- https://api.github.com/repos/MediaBrowser/Emby.Releases/releases/latest \
+		| sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1
 }
 
+main()
+{
+	if [ -z "$EMBY_VERSION" ]; then
+		EMBY_VERSION=$(latest_version)
+		[ -n "$EMBY_VERSION" ] || { echo "❌ Emby release info fetch failed." >&2; exit 1; }
+	fi
+
+	installed=$(dpkg-query -W -f='${Version}' emby-server 2>/dev/null)
+	if [ "$installed" = "$EMBY_VERSION" ] && ! $FORCE; then
+		echo "✅ Emby $EMBY_VERSION is already installed (use -f to reinstall)."
+		return
+	fi
+
+	echo "Updating Emby ${installed:-(not installed)} -> $EMBY_VERSION"
+
+	fileName="emby-server-deb_${EMBY_VERSION}_amd64.deb"
+	tmpDir=$(mktemp -d) || exit 1
+	trap 'rm -rf "$tmpDir"' EXIT
+	FILE=$tmpDir/$fileName
+
+	wget -qO "$FILE" "https://github.com/MediaBrowser/Emby.Releases/releases/download/${EMBY_VERSION}/$fileName" \
+		|| { echo "❌ Download of $fileName failed. Is '$EMBY_VERSION' a valid version?" >&2; exit 1; }
+
+	sudo dpkg -i "$FILE" || { echo "❌ Installation of $fileName failed." >&2; exit 1; }
+
+	# dpkg replaced the service file, so re-apply the run-as user (this restarts emby-server)
+	sudo update-emby-owner
+
+	echo "✅ Emby $EMBY_VERSION installed."
+}
+
+FORCE=false
+EMBY_VERSION=
 parse_args "$@"
 main

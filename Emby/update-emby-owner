@@ -1,48 +1,58 @@
 #!/bin/bash
 
-# Script for changing the UID that Emby Runs As
-# Needs to be run each time the server is updated
+# Script for changing the UID that Emby Runs As.
+# Needs to be run each time the server is updated: the package replaces the
+# service file below (resetting User=) and can reset ownership of the data dir.
 
 uidToRunAs=1000
 serviceName=emby-server
 serviceFile=/usr/lib/systemd/system/$serviceName.service
-newUser=`getent passwd "$uidToRunAs" | cut -d: -f1`
+dataDir=/var/lib/emby
 
-if [ -z $newUser ]
+newUser=$(getent passwd "$uidToRunAs" | cut -d: -f1)
+
+if [ -z "$newUser" ]
 then
-	echo "User with id $uidToRunAs not found"
+	echo "User with id $uidToRunAs not found" >&2
 	exit 1
 fi
 
-if ! [ -w $serviceFile ]
+if ! [ -w "$serviceFile" ]
 then
-	if [ -r $serviceFile ]
+	if [ -r "$serviceFile" ]
 	then
 		msgText="Not Writable. Are you root?"
 	else
 		msgText="Not Found"
 	fi
-	echo "Service File \"$serviceFile\" $msgText"
+	echo "Service File \"$serviceFile\" $msgText" >&2
 	exit 1
 fi
 
-existingUser=`grep "User=" $serviceFile | cut -d= -f2`
+# Only look at a real "User=" line, not e.g. a commented one or "DynamicUser="
+existingUser=$(sed -n 's/^User=//p' "$serviceFile" | head -n 1)
 
-if [ "..$existingUser.." = "..$newUser.." ]
+if [ "$existingUser" = "$newUser" ]
 then
 	echo "\"$serviceName\" already running as \"$newUser\""
 	exit 0
 fi
 
-echo "\"$serviceName\" changing to run as \"$newUser\" (instead of \"$existingUser\")"
+echo "\"$serviceName\" changing to run as \"$newUser\" (instead of \"${existingUser:-default}\")"
 
-string1="User=$existingUser"
-string2="User=$newUser"
-systemctl stop $serviceName
-sed -i "s/$string1/$string2/g" $serviceFile
+systemctl stop "$serviceName"
 
-chown -R $newUser:$newUser /var/lib/emby/
+if [ -n "$existingUser" ]
+then
+	sed -i "s/^User=.*/User=$newUser/" "$serviceFile"
+else
+	# No User= line: add one right after the [Service] header
+	sed -i "/^\[Service\]/a User=$newUser" "$serviceFile"
+fi
+
+# Use the user's primary group rather than assuming one with the same name
+chown -R "$newUser:$(id -gn "$newUser")" "$dataDir"
 
 systemctl daemon-reload
-systemctl start $serviceName
-systemctl status $serviceName
+systemctl start "$serviceName"
+systemctl status --no-pager "$serviceName"
