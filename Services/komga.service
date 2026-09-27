@@ -4,6 +4,7 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
+# Must match KOMGA_USER in /usr/local/etc/komga.conf (systemd cannot expand variables here)
 User=komga
 Group=komga
 Type=simple

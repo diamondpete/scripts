@@ -51,6 +51,7 @@ parse_args()
 init_params()
 {
 	: "${KOMGA_APP_DIR:=/opt/komga}"
+	: "${KOMGA_USER:=komga}"
 }
 
 validate_params()
@@ -97,7 +98,7 @@ main()
 		fi
 		mv -f "release-latest.json.tmp" "release-latest.json"
 
-		chown komga "$jar"
+		chown "$KOMGA_USER" "$jar"
 		echo "✅ Downloaded Komga $jar"
 		updated=true
 	fi

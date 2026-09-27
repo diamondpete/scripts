@@ -93,6 +93,7 @@ parse_args()
 init_params()
 {
 	: "${KOMGA_APP_DIR:=/opt/komga}"
+	: "${KOMGA_USER:=komga}"
 	: "${KOMGA_BACKUP_DB_FILE:=$KOMGA_APP_DIR/database.sqlite}"
 	: "${KOMGA_BACKUP_DEST_DIR:=/opt/komga/backup}"
 	: "${KOMGA_BACKUP_PREFIX:=komga_database_}"
@@ -109,7 +110,7 @@ validate_params()
 	if [ ! -d "$KOMGA_BACKUP_DEST_DIR" ]; then
 		# If either mkdir or chown fails, an error message will be printed and you will have to exit, ignore SC2015.
 		# shellcheck disable=SC2015
-		mkdir -p "$KOMGA_BACKUP_DEST_DIR" && chown komga "$KOMGA_BACKUP_DEST_DIR" || { echo "❌ Komga backup failed." >&2 ; exit 1; }
+		mkdir -p "$KOMGA_BACKUP_DEST_DIR" && chown "$KOMGA_USER" "$KOMGA_BACKUP_DEST_DIR" || { echo "❌ Komga backup failed." >&2 ; exit 1; }
 	fi
 }
 
