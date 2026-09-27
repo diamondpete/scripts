@@ -1,6 +1,7 @@
 [Unit]
 Description=Sonarr Daemon
-After=syslog.target network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 User=sonarr
@@ -9,6 +10,8 @@ Type=simple
 
 ExecStart=/opt/Sonarr/Sonarr -nobrowser -data=/usr/local/sonarr
 TimeoutStopSec=20
+# Upstream recommendation: Sonarr's updater runs as a child process and must
+# survive the service being stopped during an update
 KillMode=process
 Restart=on-failure
 
