@@ -1,2 +1,3 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Auto detect text files and always check them out with LF line endings,
+# so scripts copied from a Windows checkout still run on Linux/FreeBSD
+* text=auto eol=lf
