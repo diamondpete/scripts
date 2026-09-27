@@ -6,14 +6,19 @@ usage()
 Usage: $(basename "$0") [OPTIONS]
   DESCRIPTION
     Update emby to a new version.
-    Without -v, the latest stable release on GitHub is installed.
+    Without -v, the latest stable release on GitHub is installed. If the installed
+    version is newer than the latest stable (i.e. a beta), the latest beta is used instead.
+    Never downgrades unless a version is given with -v.
   OPTIONS
-    -v|--version <VERSION>      Install a specific version
+    -v|--version <VERSION>      Install a specific version (allows downgrades)
+    -b|--beta                   Use the latest release including betas
     -f|--force                  Reinstall even if the version is already installed
     -h|--help                   Show usage
   EXAMPLE
-    * Update to the latest stable version.
+    * Update to the latest version on the current channel (stable or beta).
       $ $(basename "$0")
+    * Switch to the latest beta.
+      $ $(basename "$0") -b
     * Update to version '4.8.0.62'.
       $ $(basename "$0") -v 4.8.0.62
 EOS
@@ -32,6 +37,10 @@ parse_args()
 				fi
 				EMBY_VERSION=$2
 				shift
+			;;
+
+			--beta|-b)
+				BETA=true
 			;;
 
 			--force|-f)
@@ -53,23 +62,58 @@ parse_args()
 	done
 }
 
+RELEASES_API=https://api.github.com/repos/MediaBrowser/Emby.Releases/releases
+
 # Print the tag of the latest stable (non-prerelease) Emby release
-latest_version()
+latest_stable()
 {
-	wget -qO- https://api.github.com/repos/MediaBrowser/Emby.Releases/releases/latest \
+	wget -qO- "$RELEASES_API/latest" \
 		| sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1
+}
+
+# Print the highest tag among recent releases, betas included
+latest_beta()
+{
+	wget -qO- "$RELEASES_API?per_page=30" \
+		| sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | sort -V | tail -n 1
+}
+
+# True if version $1 is newer than version $2
+newer()
+{
+	dpkg --compare-versions "$1" gt "$2"
 }
 
 main()
 {
+	installed=$(dpkg-query -W -f='${Version}' emby-server 2>/dev/null)
+
 	if [ -z "$EMBY_VERSION" ]; then
-		EMBY_VERSION=$(latest_version)
-		[ -n "$EMBY_VERSION" ] || { echo "❌ Emby release info fetch failed." >&2; exit 1; }
+		explicit=false
+		stable=$(latest_stable)
+		[ -n "$stable" ] || { echo "❌ Emby release info fetch failed." >&2; exit 1; }
+
+		# Stay on the beta channel when a beta newer than the latest stable is installed
+		if $BETA || { [ -n "$installed" ] && newer "$installed" "$stable"; }; then
+			EMBY_VERSION=$(latest_beta)
+			[ -n "$EMBY_VERSION" ] || { echo "❌ Emby release info fetch failed." >&2; exit 1; }
+			channel=beta
+		else
+			EMBY_VERSION=$stable
+			channel=stable
+		fi
+	else
+		explicit=true
 	fi
 
-	installed=$(dpkg-query -W -f='${Version}' emby-server 2>/dev/null)
 	if [ "$installed" = "$EMBY_VERSION" ] && ! $FORCE; then
 		echo "✅ Emby $EMBY_VERSION is already installed (use -f to reinstall)."
+		return
+	fi
+
+	if ! $explicit && [ -n "$installed" ] && newer "$installed" "$EMBY_VERSION"; then
+		echo "✅ Emby $installed is newer than the latest $channel release ($EMBY_VERSION); not downgrading."
+		echo "   Use -v <VERSION> to install a specific version."
 		return
 	fi
 
@@ -91,6 +135,7 @@ main()
 	echo "✅ Emby $EMBY_VERSION installed."
 }
 
+BETA=false
 FORCE=false
 EMBY_VERSION=
 parse_args "$@"
