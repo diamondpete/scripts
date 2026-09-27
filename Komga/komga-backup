@@ -6,7 +6,7 @@ usage()
 Usage: $(basename "$0") [OPTIONS]
   DESCRIPTION
     Backup Komga database file.
-    This command depends on a few variables in /usr/local/etc/komga-plugin.conf.
+    This command depends on a few variables in /usr/local/etc/komga.conf.
   OPTIONS
     -t|--target target_db_file  Target sqlite database file
                                 Default: $KOMGA_APP_DIR/database.sqlite
@@ -23,13 +23,23 @@ Usage: $(basename "$0") [OPTIONS]
     -h|--help                   Show usage
     --debug                     Execute with debug mode
   EXAMPLE
-    * Back up to the default application directory.
-      That is, make '/opt/komga/database.sqlite' a '/opt/komga/komga_database_YYYYmmddTHHMMSSTZ.sqlite' backup
+    * Back up to the default backup directory.
+      That is, make '/opt/komga/database.sqlite' a '/opt/komga/backup/komga_database_YYYYmmddTHHMMSSTZ.sqlite' backup
       $ $(basename "$0")
 
     * Change the destination to '/mnt/backup'.
       $ $(basename "$0") -d /mnt/backup
 EOS
+}
+
+# Exit with an error if option $1 has no value $2
+need_arg()
+{
+	if [ -z "$2" ]; then
+		echo "❌ Option '$1' requires an argument" >&2
+		usage
+		exit 1
+	fi
 }
 
 parse_args()
@@ -42,21 +52,25 @@ parse_args()
 			;;
 
 			--target|-t)
+				need_arg "$1" "$2"
 				KOMGA_BACKUP_DB_FILE=$2
 				shift
 			;;
 
 			--dest|-d)
+				need_arg "$1" "$2"
 				KOMGA_BACKUP_DEST_DIR=$2
 				shift
 			;;
 
 			--prefix|-p)
+				need_arg "$1" "$2"
 				KOMGA_BACKUP_PREFIX=$2
 				shift
 			;;
 
 			--suffix|-s)
+				need_arg "$1" "$2"
 				KOMGA_BACKUP_SUFFIX=$2
 				shift
 			;;
@@ -95,19 +109,29 @@ validate_params()
 	if [ ! -d "$KOMGA_BACKUP_DEST_DIR" ]; then
 		# If either mkdir or chown fails, an error message will be printed and you will have to exit, ignore SC2015.
 		# shellcheck disable=SC2015
-		mkdir -p $KOMGA_BACKUP_DEST_DIR && chown komga $KOMGA_BACKUP_DEST_DIR || { echo "❌ Komga backup failed." >&2 ; exit 1; }
+		mkdir -p "$KOMGA_BACKUP_DEST_DIR" && chown komga "$KOMGA_BACKUP_DEST_DIR" || { echo "❌ Komga backup failed." >&2 ; exit 1; }
 	fi
 }
 
 main()
 {
 	archive_filename="${KOMGA_BACKUP_PREFIX}$(date '+%Y%m%dT%H%M%S%z')"
-	sqlite3 "$KOMGA_BACKUP_DB_FILE" ".backup /tmp/$archive_filename.sqlite"
+	staging_dir=$(mktemp -d) || { echo "❌ Komga backup failed." >&2 ; exit 1; }
+	trap 'rm -rf "$staging_dir"' EXIT
+
+	# sqlite's online backup is safe to take while Komga is running
+	sqlite3 "$KOMGA_BACKUP_DB_FILE" ".backup '$staging_dir/$archive_filename.sqlite'" \
+		|| { echo "❌ Komga database backup failed." >&2 ; exit 1; }
+
 	if [ "$KOMGA_BACKUP_SUFFIX" = ".sqlite" ]; then
-		mv "/tmp/$archive_filename.sqlite" "$KOMGA_BACKUP_DEST_DIR"
-		return
+		mv "$staging_dir/$archive_filename.sqlite" "$KOMGA_BACKUP_DEST_DIR" \
+			|| { echo "❌ Komga backup failed." >&2 ; exit 1; }
+	else
+		tar -C "$staging_dir" -acf "$KOMGA_BACKUP_DEST_DIR/$archive_filename$KOMGA_BACKUP_SUFFIX" "$archive_filename.sqlite" \
+			|| { echo "❌ Komga backup archive failed." >&2 ; exit 1; }
 	fi
-	tar --cd "/tmp" -acf "$KOMGA_BACKUP_DEST_DIR/$archive_filename$KOMGA_BACKUP_SUFFIX" "$archive_filename.sqlite"
+
+	echo "✅ Backed up to $KOMGA_BACKUP_DEST_DIR/$archive_filename$KOMGA_BACKUP_SUFFIX"
 }
 
 . /usr/local/etc/komga.conf

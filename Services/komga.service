@@ -1,18 +1,27 @@
 [Unit]
 Description=Komga Daemon
-After=syslog.target network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 User=komga
 Group=komga
 Type=simple
 
-Environment=LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/usr/lib/x86_64-linux-gnu
+# Defaults, overridden by /usr/local/etc/komga.conf when it sets them
+Environment=KOMGA_APP_DIR=/opt/komga
+Environment=KOMGA_APP_JAR=komga-latest.jar
+EnvironmentFile=-/usr/local/etc/komga.conf
 
-ExecStart=/usr/bin/java --enable-preview --enable-native-access=ALL-UNNAMED -jar /opt/komga/komga-latest.jar --komga.config-dir="/opt/komga/"
+# systemd does not expand variables in Environment=, so set the path directly
+Environment=LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu
+
+# $KOMGA_JAVA_OPTS is unquoted so it can hold several options (or none)
+ExecStart=/usr/bin/java --enable-preview --enable-native-access=ALL-UNNAMED $KOMGA_JAVA_OPTS -jar ${KOMGA_APP_DIR}/${KOMGA_APP_JAR} --komga.config-dir=${KOMGA_APP_DIR}/
 
 TimeoutStopSec=20
-KillMode=process
+# Java exits with 143 on SIGTERM; treat a normal stop as success
+SuccessExitStatus=143
 Restart=on-failure
 
 [Install]

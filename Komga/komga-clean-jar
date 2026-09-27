@@ -6,23 +6,34 @@ usage()
 Usage: $(basename "$0") [OPTIONS]
   DESCRIPTION
     Clean Komga jar files.
-    This command depends on a few variables in /usr/local/etc/komga-plugin.conf.
+    This command depends on a few variables in /usr/local/etc/komga.conf.
   OPTIONS
     -t|--target target_dir     Target directory to clean
                                Default: /opt/komga
     -k|--keep keep_file_count  Number of generations to keep.
                                Default: 3
-    --dry-run                  Display the delete command without actually executing it.
+    --dry-run                  List the files that would be deleted without deleting them.
     -h|--help                  Show usage
     --debug                    Execute with debug mode
   EXAMPLE
     * Run the clean with the default parameters.
-      That is, it will delete all files matching 'komga-*.jar' in '/opt/komga' except the latest three generations.
+      That is, it will delete all files matching 'komga-X.Y.Z.jar' in '/opt/komga' except the latest three generations.
+      Leftover 'komga-X.Y.Z.jar.part' and 'komga-X.Y.Z.jar.1' download files are also removed.
       $ $(basename "$0")
 
-    * If you want to see the files to be removed without running them, try the '--dry-run' option.
+    * If you want to see the files to be removed without removing them, try the '--dry-run' option.
       $ $(basename "$0") --dry-run
 EOS
+}
+
+# Exit with an error if option $1 has no value $2
+need_arg()
+{
+	if [ -z "$2" ]; then
+		echo "❌ Option '$1' requires an argument" >&2
+		usage
+		exit 1
+	fi
 }
 
 parse_args()
@@ -35,15 +46,17 @@ parse_args()
 			;;
 
 			--dry-run)
-				xargs_opt='-p'
+				DRY_RUN=true
 			;;
 
 			--target|-t)
+				need_arg "$1" "$2"
 				KOMGA_APP_DIR=$2
 				shift
 			;;
 
 			--keep|-k)
+				need_arg "$1" "$2"
 				KOMGA_JAR_KEEP_SIZE=$2
 				shift
 			;;
@@ -71,18 +84,44 @@ init_params()
 
 validate_params()
 {
-	if [ ! -d $KOMGA_APP_DIR ]; then
+	if [ ! -d "$KOMGA_APP_DIR" ]; then
 		echo "❌ Destination dir '$KOMGA_APP_DIR' does not exist or is not a directory." >&2
 		exit 1
 	fi
+
+	case $KOMGA_JAR_KEEP_SIZE in
+		''|*[!0-9]*)
+			echo "❌ Keep count '$KOMGA_JAR_KEEP_SIZE' is not a number." >&2
+			exit 1
+		;;
+	esac
+}
+
+remove()
+{
+	while IFS= read -r file; do
+		if $DRY_RUN; then
+			echo "Would delete: $file"
+		else
+			rm -f "$file"
+		fi
+	done
 }
 
 main()
 {
 	echo "Cleaning JARs"
-	find ${KOMGA_APP_DIR} -regextype posix-extended -regex "${KOMGA_APP_DIR}/komga-(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.jar" 2>/dev/null | sort --version-sort -r | tail -n +"$((KOMGA_JAR_KEEP_SIZE + 1))" | xargs $xargs_opt -I@ rm -f @
+	# Keep the newest N versioned JARs (komga-latest.jar is a link and never matches)
+	find "$KOMGA_APP_DIR" -maxdepth 1 -type f -regextype posix-extended \
+		-regex ".*/komga-(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.jar" \
+		| sort --version-sort -r | tail -n +"$((KOMGA_JAR_KEEP_SIZE + 1))" | remove
+
+	# Partial downloads left behind by an interrupted komga-update, and
+	# 'komga-X.Y.Z.jar.1' style duplicates from older versions of komga-update
+	find "$KOMGA_APP_DIR" -maxdepth 1 -type f \( -name 'komga-*.jar.part' -o -name 'komga-*.jar.[0-9]*' \) | remove
 }
 
+DRY_RUN=false
 . /usr/local/etc/komga.conf
 parse_args "$@"
 init_params
