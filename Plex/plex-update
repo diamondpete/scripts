@@ -7,8 +7,9 @@ Usage: $(basename "$0") [OPTIONS]
   DESCRIPTION
     Update plex to a new version.
     Without -v, the latest public release is installed.
+    Never downgrades (e.g. from a Plex Pass beta) unless a version is given with -v.
   OPTIONS
-    -v|--version <VERSION>      Install a specific version
+    -v|--version <VERSION>      Install a specific version (allows downgrades)
     -f|--force                  Reinstall even if the version is already installed
     -h|--help                   Show usage
   EXAMPLE
@@ -61,14 +62,24 @@ latest_version()
 
 main()
 {
+	installed=$(dpkg-query -W -f='${Version}' plexmediaserver 2>/dev/null)
+
 	if [ -z "$APP_VERSION" ]; then
+		explicit=false
 		APP_VERSION=$(latest_version)
 		[ -n "$APP_VERSION" ] || { echo "❌ Plex release info fetch failed." >&2; exit 1; }
+	else
+		explicit=true
 	fi
 
-	installed=$(dpkg-query -W -f='${Version}' plexmediaserver 2>/dev/null)
 	if [ "$installed" = "$APP_VERSION" ] && ! $FORCE; then
 		echo "✅ Plex $APP_VERSION is already installed (use -f to reinstall)."
+		return
+	fi
+
+	if ! $explicit && [ -n "$installed" ] && dpkg --compare-versions "$installed" gt "$APP_VERSION"; then
+		echo "✅ Plex $installed is newer than the latest public release ($APP_VERSION); not downgrading."
+		echo "   Use -v <VERSION> to install a specific version."
 		return
 	fi
 
