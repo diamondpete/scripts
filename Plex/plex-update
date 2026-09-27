@@ -5,11 +5,15 @@ usage()
 	cat <<EOS >&2
 Usage: $(basename "$0") [OPTIONS]
   DESCRIPTION
-    Update plex to new version.
+    Update plex to a new version.
+    Without -v, the latest public release is installed.
   OPTIONS
-    -v|--version                New version number
+    -v|--version <VERSION>      Install a specific version
+    -f|--force                  Reinstall even if the version is already installed
     -h|--help                   Show usage
   EXAMPLE
+    * Update to the latest public version.
+      $ $(basename "$0")
     * Update to Version 1.32.8.7639-fb6452ebf.
       $ $(basename "$0") -v 1.32.8.7639-fb6452ebf
 EOS
@@ -21,8 +25,17 @@ parse_args()
 	do
 		case $1 in
 			--version|-v)
+				if [ -z "$2" ]; then
+					echo "❌ Option '$1' requires a version argument" >&2
+					usage
+					exit 1
+				fi
 				APP_VERSION=$2
 				shift
+			;;
+
+			--force|-f)
+				FORCE=true
 			;;
 
 			--help|-h)
@@ -40,18 +53,42 @@ parse_args()
 	done
 }
 
-main()
+# Print the latest public (non Plex Pass) Linux release version
+latest_version()
 {
-	fileName="plexmediaserver_${APP_VERSION}_amd64.deb"
-	FILE=$HOME/$fileName
-	wget "https://downloads.plex.tv/plex-media-server-new/${APP_VERSION}/debian/plexmediaserver_${APP_VERSION}_amd64.deb" -O $FILE || rm $FILE
-
-	if [ -f "$FILE" ]; then
-		sudo dpkg -i $FILE
-
-		rm $FILE
-	fi
+	wget -qO- https://plex.tv/api/downloads/5.json | jq -r '.computer.Linux.version // empty'
 }
 
+main()
+{
+	if [ -z "$APP_VERSION" ]; then
+		APP_VERSION=$(latest_version)
+		[ -n "$APP_VERSION" ] || { echo "❌ Plex release info fetch failed." >&2; exit 1; }
+	fi
+
+	installed=$(dpkg-query -W -f='${Version}' plexmediaserver 2>/dev/null)
+	if [ "$installed" = "$APP_VERSION" ] && ! $FORCE; then
+		echo "✅ Plex $APP_VERSION is already installed (use -f to reinstall)."
+		return
+	fi
+
+	echo "Updating Plex ${installed:-(not installed)} -> $APP_VERSION"
+
+	fileName="plexmediaserver_${APP_VERSION}_amd64.deb"
+	tmpDir=$(mktemp -d) || exit 1
+	trap 'rm -rf "$tmpDir"' EXIT
+	FILE=$tmpDir/$fileName
+
+	wget -qO "$FILE" "https://downloads.plex.tv/plex-media-server-new/${APP_VERSION}/debian/$fileName" \
+		|| { echo "❌ Download of $fileName failed. Is '$APP_VERSION' a valid version?" >&2; exit 1; }
+
+	# The package restarts plexmediaserver itself
+	sudo dpkg -i "$FILE" || { echo "❌ Installation of $fileName failed." >&2; exit 1; }
+
+	echo "✅ Plex $APP_VERSION installed."
+}
+
+FORCE=false
+APP_VERSION=
 parse_args "$@"
 main
