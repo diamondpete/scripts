@@ -6,15 +6,23 @@ usage()
 Usage: $(basename "$0") [OPTIONS]
   DESCRIPTION
     Update plex to a new version.
-    Without -v, the latest public release is installed.
-    Never downgrades (e.g. from a Plex Pass beta) unless a version is given with -v.
+    Without -v, the latest public release is installed. If the installed version is
+    newer than the latest public release (i.e. a beta), the latest beta is used instead.
+    Never downgrades unless a version is given with -v.
   OPTIONS
     -v|--version <VERSION>      Install a specific version (allows downgrades)
+    -b|--beta                   Use the latest Plex Pass beta
     -f|--force                  Reinstall even if the version is already installed
     -h|--help                   Show usage
+  BETA
+    Betas need the server's Plex Pass account token. It is read from the server's
+    Preferences.xml (via sudo), or from the PLEX_TOKEN environment variable if set.
+    If the account has no Plex Pass, Plex returns the public release instead.
   EXAMPLE
-    * Update to the latest public version.
+    * Update to the latest version on the current channel (public or beta).
       $ $(basename "$0")
+    * Switch to the latest Plex Pass beta.
+      $ $(basename "$0") -b
     * Update to Version 1.32.8.7639-fb6452ebf.
       $ $(basename "$0") -v 1.32.8.7639-fb6452ebf
 EOS
@@ -33,6 +41,10 @@ parse_args()
 				fi
 				APP_VERSION=$2
 				shift
+			;;
+
+			--beta|-b)
+				BETA=true
 			;;
 
 			--force|-f)
@@ -54,10 +66,30 @@ parse_args()
 	done
 }
 
-# Print the latest public (non Plex Pass) Linux release version
-latest_version()
+DOWNLOADS_API=https://plex.tv/api/downloads/5.json
+PREFERENCES="/var/lib/plexmediaserver/Library/Application Support/Plex Media Server/Preferences.xml"
+
+# Print the Plex account token: $PLEX_TOKEN, or the one the server signed in with
+plex_token()
 {
-	wget -qO- https://plex.tv/api/downloads/5.json | jq -r '.computer.Linux.version // empty'
+	if [ -n "$PLEX_TOKEN" ]; then
+		echo "$PLEX_TOKEN"
+		return
+	fi
+	sudo sed -n 's/.*PlexOnlineToken="\([^"]*\)".*/\1/p' "$PREFERENCES" 2>/dev/null | head -n 1
+}
+
+# Print the latest public (non Plex Pass) Linux release version
+latest_public()
+{
+	wget -qO- "$DOWNLOADS_API" | jq -r '.computer.Linux.version // empty'
+}
+
+# Print the latest Plex Pass (beta) Linux release version, using token $1.
+# The token goes in a header rather than the URL.
+latest_beta()
+{
+	wget -qO- --header="X-Plex-Token: $1" "$DOWNLOADS_API?channel=plexpass" | jq -r '.computer.Linux.version // empty'
 }
 
 main()
@@ -66,8 +98,23 @@ main()
 
 	if [ -z "$APP_VERSION" ]; then
 		explicit=false
-		APP_VERSION=$(latest_version)
+		APP_VERSION=$(latest_public)
 		[ -n "$APP_VERSION" ] || { echo "❌ Plex release info fetch failed." >&2; exit 1; }
+		channel=public
+
+		# Stay on the beta channel when a beta newer than the latest public release is installed
+		if $BETA || { [ -n "$installed" ] && dpkg --compare-versions "$installed" gt "$APP_VERSION"; }; then
+			token=$(plex_token)
+			if [ -n "$token" ]; then
+				beta=$(latest_beta "$token")
+				[ -n "$beta" ] || { echo "❌ Plex beta release info fetch failed." >&2; exit 1; }
+				APP_VERSION=$beta
+				channel=beta
+			elif $BETA; then
+				echo "❌ No Plex token found. Sign the server in to Plex, or set PLEX_TOKEN." >&2
+				exit 1
+			fi
+		fi
 	else
 		explicit=true
 	fi
@@ -78,7 +125,7 @@ main()
 	fi
 
 	if ! $explicit && [ -n "$installed" ] && dpkg --compare-versions "$installed" gt "$APP_VERSION"; then
-		echo "✅ Plex $installed is newer than the latest public release ($APP_VERSION); not downgrading."
+		echo "✅ Plex $installed is newer than the latest $channel release ($APP_VERSION); not downgrading."
 		echo "   Use -v <VERSION> to install a specific version."
 		return
 	fi
@@ -99,6 +146,7 @@ main()
 	echo "✅ Plex $APP_VERSION installed."
 }
 
+BETA=false
 FORCE=false
 APP_VERSION=
 parse_args "$@"
