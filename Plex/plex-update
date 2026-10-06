@@ -12,11 +12,14 @@ Usage: $(basename "$0") [OPTIONS]
   OPTIONS
     -v|--version <VERSION>      Install a specific version (allows downgrades)
     -b|--beta                   Use the latest Plex Pass beta
+    -d|--data-dir <DIR>         Plex data directory (holds 'Library/Application Support')
+                                Default: \$PLEX_DATA_DIR, or /var/lib/plexmediaserver
     -f|--force                  Reinstall even if the version is already installed
     -h|--help                   Show usage
   BETA
     Betas need the server's Plex Pass account token. It is read from the server's
-    Preferences.xml (via sudo), or from the PLEX_TOKEN environment variable if set.
+    Preferences.xml in the data directory (via sudo), or from the PLEX_TOKEN
+    environment variable if set.
     If the account has no Plex Pass, Plex returns the public release instead.
   EXAMPLE
     * Update to the latest version on the current channel (public or beta).
@@ -47,6 +50,16 @@ parse_args()
 				BETA=true
 			;;
 
+			--data-dir|-d)
+				if [ -z "$2" ]; then
+					echo "❌ Option '$1' requires a directory argument" >&2
+					usage
+					exit 1
+				fi
+				PLEX_DATA_DIR=$2
+				shift
+			;;
+
 			--force|-f)
 				FORCE=true
 			;;
@@ -67,8 +80,6 @@ parse_args()
 }
 
 DOWNLOADS_API=https://plex.tv/api/downloads/5.json
-PREFERENCES="/var/lib/plexmediaserver/Library/Application Support/Plex Media Server/Preferences.xml"
-
 # Print the Plex account token: $PLEX_TOKEN, or the one the server signed in with
 plex_token()
 {
@@ -76,7 +87,8 @@ plex_token()
 		echo "$PLEX_TOKEN"
 		return
 	fi
-	sudo sed -n 's/.*PlexOnlineToken="\([^"]*\)".*/\1/p' "$PREFERENCES" 2>/dev/null | head -n 1
+	preferences="$PLEX_DATA_DIR/Library/Application Support/Plex Media Server/Preferences.xml"
+	sudo sed -n 's/.*PlexOnlineToken="\([^"]*\)".*/\1/p' "$preferences" 2>/dev/null | head -n 1
 }
 
 # Print the latest public (non Plex Pass) Linux release version
@@ -146,6 +158,7 @@ main()
 	echo "✅ Plex $APP_VERSION installed."
 }
 
+: "${PLEX_DATA_DIR:=/var/lib/plexmediaserver}"
 BETA=false
 FORCE=false
 APP_VERSION=
