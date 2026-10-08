@@ -11,10 +11,13 @@ usage()
 	cat <<EOS >&2
 Usage: $(basename "$0") [OPTIONS]
   DESCRIPTION
-    Update or reinstall nvidia drivers
+    Update or reinstall nvidia drivers.
+    By default the newest driver on download.nvidia.com is used, which is often
+    newer than the production branch release listed in latest.txt.
   OPTIONS
     -r|--reinstall              Reinstall current driver after kernel update
     -v|--version <VERSION>      Install a specific version (skips the installed version check)
+    -p|--production             Use the production branch release from latest.txt
     -h|--help                   Show usage
   EXAMPLE
     * Reinstall current driver if newer version not available
@@ -30,6 +33,9 @@ parse_args()
 		case $1 in
 			--reinstall|-r)
 				REINSTALL=true
+			;;
+			--production|-p)
+				PRODUCTION=true
 			;;
 			--help|-h)
 				usage
@@ -76,13 +82,36 @@ local_version() {
 	nvidia-smi --version 2>/dev/null | awk 'NR==1 && $4 ~ /^[0-9]+(\.[0-9]+)+$/ {print $4}'
 }
 
-# Print the latest driver version published by NVIDIA
-remote_version() {
+run_file() {
+	echo "NVIDIA-Linux-x86_64-$1.run"
+}
+
+# Print the production branch version NVIDIA lists in latest.txt
+production_version() {
 	wget -qO- "$BASE_URL/latest.txt" | awk 'NR==1{print $1}'
 }
 
-run_file() {
-	echo "NVIDIA-Linux-x86_64-$1.run"
+# Print the newest version folder on the download site that has an installer.
+# A folder can appear before its .run is uploaded, so check the newest few.
+newest_version() {
+	wget -qO- "$BASE_URL/" \
+		| grep -oE "href=['\"][0-9]+(\.[0-9]+)+/['\"]" | grep -oE '[0-9]+(\.[0-9]+)+' \
+		| sort -Vru | head -n 5 \
+		| while read -r version; do
+			if wget -q --spider "$BASE_URL/$version/$(run_file "$version")"; then
+				echo "$version"
+				break
+			fi
+		done
+}
+
+# Print the version to update to
+remote_version() {
+	if $PRODUCTION; then
+		production_version
+	else
+		newest_version
+	fi
 }
 
 # Download (if not already present) and install driver version $1
@@ -161,6 +190,7 @@ main() {
 }
 
 REINSTALL=false
+PRODUCTION=false
 TARGET_VERSION=
 parse_args "$@"
 main
