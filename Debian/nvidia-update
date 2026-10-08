@@ -114,7 +114,26 @@ remote_version() {
 	fi
 }
 
-# Download (if not already present) and install driver version $1
+# Check installer $2 for driver version $1 against NVIDIA's published SHA-256.
+# A bad file is deleted so the next run downloads it again. Older drivers
+# (e.g. 390.x) have no checksum file, so verification is skipped for them.
+verify_driver() {
+	expected=$(wget -qO- "$BASE_URL/$1/$2.sha256sum" | awk 'NR==1{print $1}')
+	if [ -z "$expected" ]; then
+		echo "⚠️  No checksum available for $2, skipping verification"
+		return
+	fi
+
+	actual=$(sha256sum "$2" | awk '{print $1}')
+	if [ "$actual" != "$expected" ]; then
+		echo "❌ Checksum mismatch for $2, deleted it. Run again to re-download." >&2
+		rm -f "$2"
+		exit 1
+	fi
+	echo "✅ Checksum verified for $2"
+}
+
+# Download (if not already present), verify and install driver version $1
 install_driver() {
 	file=$(run_file "$1")
 
@@ -122,6 +141,9 @@ install_driver() {
 		echo "Downloading $file"
 		wget -q "$BASE_URL/$1/$file" || { echo "❌ Download of $file failed." >&2; rm -f "$file"; exit 1; }
 	fi
+
+	# Also verifies a previously kept installer before a reinstall
+	verify_driver "$1" "$file"
 
 	# ==Creating and Importing Keys==
 	# openssl req -new -x509 -newkey rsa:2048 -keyout <path-to-keystore>/Nvidia.key -outform DER -out <path-to-keystore>/Nvidia.der -nodes -days 36500 -subj "/CN=Graphics Drivers"
