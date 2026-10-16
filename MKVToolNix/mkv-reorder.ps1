@@ -31,6 +31,11 @@
       * Commentary: commentary tracks only. All other tracks are cleared.
       * Names: the file title and every track name are removed, except signs
         tracks, which are named -SignsSubName ('Titles & Signs').
+      * Language: audio and subtitle tracks with no language set (und) get one
+        from their track name, using -LanguageWords (e.g. 'Japanese', 'JPN',
+        'JP' -> jpn; 'English', 'ENG', 'EN' -> eng). This happens before the
+        order is worked out, and the language is written to the output file.
+        A signs track still without a language is set to -SignsLanguage (eng).
 
 .PARAMETER Path
     MKV files or folders to process. Default: *.mkv in the current folder.
@@ -53,8 +58,18 @@
 .PARAMETER SignsSubName
     Name given to the signs subtitle track(s). Default: 'Titles & Signs'.
 
+.PARAMETER SignsLanguage
+    Language given to a signs track that has none (und) and none in its name.
+    Default: 'eng'.
+
 .PARAMETER DefaultSubLanguage
     Language of the full subtitle track to mark as default. Default: 'eng'.
+
+.PARAMETER LanguageWords
+    Words to look for in the name of a track with no language, as a hashtable of
+    ISO 639-2 code -> regular expression alternatives. Words only match whole,
+    so 'en' matches 'Subs [EN]' but not 'Opening'.
+    Default: @{ jpn = 'japanese|jpn|jap|jp|ja'; eng = 'english|eng|en' }
 
 .PARAMETER MkvMerge
     Path to mkvmerge.exe.
@@ -82,7 +97,11 @@ param(
 
     [string] $SignsSubName = 'Titles & Signs',
 
+    [string] $SignsLanguage = 'eng',
+
     [string] $DefaultSubLanguage = 'eng',
+
+    [hashtable] $LanguageWords = @{ jpn = 'japanese|jpn|jap|jp|ja'; eng = 'english|eng|en' },
 
     [string] $MkvMerge = 'C:\Program Files\MKVToolNix\mkvmerge.exe'
 )
@@ -99,6 +118,33 @@ function Test-Language($Track, [string] $Code) {
     if ($props.language -eq $Code) { return $true }
     $ietf = [string] $props.language_ietf
     return ($ietf -eq $Code -or $ietf -like "$Code-*")
+}
+
+# IETF tags for the guessable languages, so -AudioOrder 'ja'/'en' still matches
+$ietfTags = @{ jpn = 'ja'; eng = 'en' }
+
+# For audio/subtitle tracks with no language, set one from words in the track
+# name. Updates the tracks in place and returns the ones that were changed.
+function Set-LanguageFromName($Tracks) {
+    foreach ($track in $Tracks) {
+        if ($track.type -notin 'audio', 'subtitles') { continue }
+        $language = [string] $track.properties.language
+        if ($language -and $language -ne 'und') { continue }
+
+        $name = [string] $track.properties.track_name
+        $found = @($LanguageWords.Keys | Where-Object {
+            $name -match "(?<![a-z0-9])(?:$($LanguageWords[$_]))(?![a-z0-9])"
+        })
+
+        if ($found.Count -eq 1) {
+            $code = $found[0]
+            $track.properties | Add-Member -Force NoteProperty language $code
+            $track.properties | Add-Member -Force NoteProperty language_ietf $ietfTags[$code]
+            $track
+        } elseif ($found.Count -gt 1) {
+            Write-Warning "Track $($track.id) '$name' names more than one language ($($found -join ', ')); left as und."
+        }
+    }
 }
 
 # Short description of a track for the console, e.g. "2 audio jpn 'Commentary'"
@@ -199,9 +245,23 @@ foreach ($file in $files) {
         continue
     }
 
+    $guessed = @(Set-LanguageFromName $info.tracks)
     $plan = Get-TrackOrder $info.tracks
+
+    # A signs track with no language anywhere gets -SignsLanguage
+    $defaulted = @(foreach ($track in $plan.Signs) {
+        $language = [string] $track.properties.language
+        if (-not $language -or $language -eq 'und') {
+            $track.properties | Add-Member -Force NoteProperty language $SignsLanguage
+            $track.properties | Add-Member -Force NoteProperty language_ietf $ietfTags[$SignsLanguage]
+            $track
+        }
+    })
+
     foreach ($track in $plan.Order) {
         $tags = @()
+        if ($guessed -contains $track) { $tags += 'language from name' }
+        if ($defaulted -contains $track) { $tags += 'language defaulted' }
         if ($plan.Full -contains $track) { $tags += 'full' }
         if ($plan.Signs -contains $track) { $tags += 'signs', 'forced' }
         if ($plan.Commentary -contains $track) { $tags += 'commentary' }
@@ -233,6 +293,10 @@ foreach ($file in $files) {
         # Clear every track name except the signs track's
         $name = if ($isSigns) { $SignsSubName } else { '' }
         $arguments += '--track-name', "${id}:$name"
+
+        if ($guessed -contains $track -or $defaulted -contains $track) {
+            $arguments += '--language', "${id}:$($track.properties.language)"
+        }
 
         if ($track.type -in 'video', 'audio', 'subtitles') {
             $arguments += '--default-track-flag', "${id}:$(if ($plan.Defaults -contains $track) { 1 } else { 0 })"
