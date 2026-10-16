@@ -37,6 +37,8 @@
         order is worked out, and the language is written to the output file.
         A signs track still without a language is set to -SignsLanguage (eng).
 
+    While remuxing, a progress bar shows the current file and its percentage.
+
 .PARAMETER Path
     MKV files or folders to process. Default: *.mkv in the current folder.
 
@@ -221,16 +223,18 @@ if (-not (Test-Path -LiteralPath $destinationDir)) {
     New-Item -ItemType Directory -Path $destinationDir | Out-Null
 }
 
-$files = foreach ($item in $Path) {
+$files = @(foreach ($item in $Path) {
     if (Test-Path -LiteralPath $item -PathType Container) {
         Get-ChildItem -LiteralPath $item -Filter '*.mkv' -File
     } else {
         Get-Item -LiteralPath $item
     }
-}
+})
 
 $failed = 0
+$index = 0
 foreach ($file in $files) {
+    $index++
     if ($file.DirectoryName -eq $destinationDir) {
         Write-Warning "Skipping '$($file.Name)': destination is its own folder."
         continue
@@ -282,7 +286,8 @@ foreach ($file in $files) {
         Write-Warning "No signs subtitle track found; no track will be forced."
     }
 
-    $arguments = @('--ui-language', 'en', '--priority', 'lower', '--output', (Join-Path $destinationDir $file.Name))
+    # --gui-mode makes mkvmerge print progress as '#GUI#progress N%' lines
+    $arguments = @('--ui-language', 'en', '--priority', 'lower', '--gui-mode', '--output', (Join-Path $destinationDir $file.Name))
     $arguments += '--title', $emptyArg
 
     # Per-track options must come before the input file they apply to
@@ -308,7 +313,22 @@ foreach ($file in $files) {
     $arguments += '--track-order', (($plan.Order | ForEach-Object { "0:$($_.id)" }) -join ',')
 
     if ($PSCmdlet.ShouldProcess($file.Name, "Remux to $destinationDir")) {
-        & $MkvMerge @arguments | Where-Object { $_ -match '^(Warning|Error)' } | Write-Host
+        $activity = "Remuxing file $index of $($files.Count)"
+        Write-Progress -Id 1 -Activity $activity -Status "$($file.Name): 0%" -PercentComplete 0
+
+        # Show progress as a bar; pass warnings, errors and the timing line through
+        & $MkvMerge @arguments | ForEach-Object {
+            if ($_ -match '^#GUI#progress (\d+)%') {
+                $percent = [int] $Matches[1]
+                Write-Progress -Id 1 -Activity $activity -Status "$($file.Name): $percent%" -PercentComplete $percent
+            } elseif ($_ -match '^(?:#GUI#)?(warning|error)\b:?\s*(.*)') {
+                Write-Host "  $($Matches[1].ToUpper()): $($Matches[2])" -ForegroundColor Yellow
+            } elseif ($_ -match '^Multiplexing took') {
+                Write-Host "  $_"
+            }
+        }
+        Write-Progress -Id 1 -Activity $activity -Completed
+
         # mkvmerge: 0 = success, 1 = success with warnings, 2 = error
         if ($LASTEXITCODE -ge 2) {
             Write-Warning "mkvmerge failed on '$($file.Name)'."
