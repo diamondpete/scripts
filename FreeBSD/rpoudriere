@@ -13,7 +13,6 @@ OVERLAY="overlay"
 LOCKFILE="/var/run/rpoudriere.lock"
 
 BIN_POUDRIERE="/usr/local/bin/poudriere"
-BIN_PATCH="/usr/bin/patch"
 BIN_GIT="/usr/local/bin/git"
 BIN_LOCKF="/usr/bin/lockf"
 
@@ -64,15 +63,23 @@ clean_tree() {
 }
 
 #
-# Apply every patch kept at the root of a tree.  patch(1) resolves the paths in
-# a diff against its working directory, so it runs inside the tree.
+# Apply every patch kept at the root of a tree.  git apply creates the files a
+# diff adds, which patch(1) --posix skips, and --index stages them so the next
+# clean_tree reset removes them again.  Diffs with git's a/ and b/ prefixes
+# strip one path component, plain ones none.
 #
 patch_tree() {
 	log "Patching ports tree... $1"
 	for diff in "${PATH_PORTS}/$1"/patch*; do
 		[ -f "${diff}" ] || continue
-		(cd "${PATH_PORTS}/$1" && $BIN_PATCH --posix -EfN < "${diff}") ||
+		strip=0
+		grep -q '^+++ b/' "${diff}" && strip=1
+		$BIN_GIT -C "${PATH_PORTS}/$1" apply --index -p${strip} "${diff}" && continue
+		if $BIN_GIT -C "${PATH_PORTS}/$1" apply --check -R -p${strip} "${diff}" 2>/dev/null; then
+			log "  ALREADY IN TREE: ${diff##*/}"
+		else
 			log "  FAILED: ${diff##*/}"
+		fi
 	done
 }
 
