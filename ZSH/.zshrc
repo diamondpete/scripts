@@ -72,7 +72,7 @@ setopt csh_null_glob            # report an error when all the patterns in a com
 #unsetopt nomatch               # do not show an error when using glob without quotes
 unsetopt hup                    # do not kill running jobs when shell exits
 unsetopt auto_remove_slash      # disable automatic removing of slash
-unsetopt prompt_sp              # do not preserve a partial line
+PROMPT_EOL_MARK=''              # keep output that lacks a final newline, without the highlighted '%' marker
 unsetopt auto_menu              # do not use menu completion
 #unsetopt always_last_prompt    # print completion suggestions above prompt
 #unsetopt check_jobs            # don't complain about still running background jobs on exit
@@ -108,9 +108,9 @@ bindkey '\e[3~' delete-char
 # alt+del
 bindkey '\e[3;3~' kill-word
 
-# alt+left/right
-bindkey '\e[1;3D' backward-kill-word
-bindkey '\e[1;3C' kill-word
+# alt+left/right - move by word (same as ctrl+left/right)
+bindkey '\e[1;3D' backward-word
+bindkey '\e[1;3C' forward-word
 
 # alt+up/down
 bindkey '\e[1;3A' backward-kill-line
@@ -143,7 +143,8 @@ bindkey '\e[B' history-beginning-search-forward-end
 bindkey '\eOA' history-beginning-search-backward-end
 bindkey '\eOB' history-beginning-search-forward-end
 
-# ctrl+alt+up/down to search history
+# ctrl+r, or ctrl+alt+up/down, to search history
+bindkey '\CR' history-incremental-search-backward
 bindkey '\e[1;7A' history-incremental-search-backward
 bindkey '\e[1;7B' history-incremental-search-forward
 
@@ -168,10 +169,10 @@ _foreground() { CURSOR=0 LBUFFER+=' fg %' && zle accept-line }
 zle -N _foreground
 bindkey '\CF' _foreground
 
-# ctrl+r - update shell history
+# alt+r - reload history, picking up commands entered in other open shells
 _read_hist() { fc -R && zle -M 'history updated' }
 zle -N _read_hist
-bindkey '\CR' _read_hist
+bindkey '\er' _read_hist
 
 # alt+h - last 25 history lines
 _last_hist() { zle -M "$(fc -rld -25)"}
