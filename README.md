@@ -12,6 +12,7 @@
 | `FreeBSD/rpoudriere` | Update poudriere ports trees, reapply patches, bulk build |
 | `FreeBSD/port-test` | Build a port and its test dependencies in a poudriere jail |
 | `ZSH/.zshrc` | zsh config for Linux and FreeBSD; copy to `~/.zshrc` |
+| `ZSH/zshrc.local.example` | Template for `~/.zshrc.local`, the per-machine file for private aliases and setting overrides (not kept in git) |
 
 ## Dependencies
 Komga: `sudo apt install openjdk-21-jre jq wget sqlite3`

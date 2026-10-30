@@ -1,0 +1,22 @@
+# Example ~/.zshrc.local: machine-specific settings and private aliases.
+#
+# Copy to ~/.zshrc.local on each machine and edit there.
+# The shared ~/.zshrc loads it last, so anything here replaces
+# what the shared file set.
+
+# ---- override shared settings ----
+#SUBNET='192.168.1.0/24'
+
+# ---- private aliases for this machine ----
+#alias nas='ssh admin@nas.lan'
+#alias applog='sudo tail -f /var/log/myapp.log'
+
+# ---- replace a shared alias with your own version ----
+#alias ll='ls -lhAF --color --group-directories-first'
+
+# ---- remove a shared alias on this machine ----
+#unalias tkill
+
+# ---- options and key bindings can be changed too ----
+#setopt share_history
+#bindkey '\e[1;3D' backward-kill-word

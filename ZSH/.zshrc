@@ -1,8 +1,11 @@
 # zsh config shared by Linux (Debian/Ubuntu) and FreeBSD.
 # Settings for both come first; OS-specific ones are in the 'case $OSTYPE'
 # blocks for the environment and for aliases/functions.
+#
+# Machine-specific settings and private aliases go in ~/.zshrc.local, which is
+# loaded last so it can override anything here. See zshrc.local.example.
 
-# ---- settings ----
+# ---- settings (override in ~/.zshrc.local) ----
 SUBNET='10.0.0.0/24'            # network scanned by 'netscan' (FreeBSD)
 
 # start tmux with shell
@@ -335,4 +338,9 @@ if [[ $OSTYPE == linux* ]]; then
     done
   }
 
+fi
+
+# ---- machine-specific settings and aliases ----
+if [[ -r ~/.zshrc.local ]]; then
+  source ~/.zshrc.local
 fi
