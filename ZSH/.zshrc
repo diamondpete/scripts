@@ -1,3 +1,10 @@
+# zsh config shared by Linux (Debian/Ubuntu) and FreeBSD.
+# Settings for both come first; OS-specific ones are in the 'case $OSTYPE'
+# blocks for the environment and for aliases/functions.
+
+# ---- settings ----
+SUBNET='10.0.0.0/24'            # network scanned by 'netscan' (FreeBSD)
+
 # start tmux with shell
 #[[ -z $TMUX ]] && exec tmux
 
@@ -7,14 +14,30 @@
 export EDITOR='vi'
 export PAGER='less'
 export LESS='-giAMR'
-export LESSOPEN='| lesspipe.sh %s'
-#export GREP_COLOR='mt=1;31'
+# Debian/Ubuntu name the less preprocessor 'lesspipe' (elsewhere it's 'lesspipe.sh')
+if (( $+commands[lesspipe] )); then
+	export LESSOPEN='| lesspipe %s'
+elif (( $+commands[lesspipe.sh] )); then
+	export LESSOPEN='| lesspipe.sh %s'
+fi
 export LS_COLORS='di=32:ln=35:so=33:pi=31:ex=34:bd=34;40:cd=35;40:su=30;42:sg=37;42:tw=30;46:ow=31;46'
 export LSCOLORS='cxfxdxbxexeafaachcagbg'
 export CLICOLOR='1'
-# user-installed Ruby gems, for whichever Ruby versions are present
-# ((N) makes the pattern expand to nothing if the folder doesn't exist)
-path=($HOME/.local/share/gem/ruby/*/bin(N) $path)
+
+case $OSTYPE in
+  linux*)
+    export SYSTEMD_EDITOR='vi'
+    export GREP_COLORS='mt=1;31'
+    export PATH="${PATH}:$HOME/.local/bin"
+    export XAUTHORITY=~/.Xauthority
+    ;;
+  freebsd*)
+    #export GREP_COLOR='mt=1;31'
+    # user-installed Ruby gems, for whichever Ruby versions are present
+    # ((N) makes the pattern expand to nothing if the folder doesn't exist)
+    path=($HOME/.local/share/gem/ruby/*/bin(N) $path)
+    ;;
+esac
 
 PROMPT='%B%F{green}%n@%m:%/%f%b%#'
 HISTFILE=$HOME/.zhistory
@@ -197,44 +220,118 @@ alias	history='fc -l -E 1'
 alias	...='../..'
 alias	....='../../..'
 alias	.....='../../../..'
-alias	p='cd /usr/ports && cd'  # use it like "p www/firefox"
 alias	grep='grep --color'
-alias	gnugrep='/usr/local/bin/grep --color'
 alias	g='grep -i'
 alias	l='less'
-alias	ls='ls -FG'
 alias	la='ls -a'
-alias	ll='ls -lhTAF'
 alias	rm='rm -I'
 alias	v='vi'
 alias	e='builtin echo'
 alias	du='du -h'
 alias	mkdir='mkdir -p'
-alias	stat='stat -x'
 alias	tkill='tmux kill-session -t'
-alias	cputemp='sysctl -a | grep "dev.cpu.*.temperature"'
-alias	logg='tail -f'
-alias	netscan='nmap -v -sn -n 10.0.0.0/24 -oG - | awk '\''/Status: Down/{print $2}'\'
-
-# iocage shortcuts
-alias	iolist='iocage list -l'
-alias	iopkg='sudo iocage exec ALL pkg upgrade'
-alias	ioupdate='sudo iocage update ALL'
-alias	ioautoremove='sudo iocage exec ALL "pkg autoremove"'
 
 # sudo shortcuts
 alias	chown='sudo chown'
 alias	chmod='sudo chmod'
 alias	srm='sudo rm'
-alias	scat='sudo cat'
-alias	ss='sudo su'
 alias	svi='sudo vi'
-alias	pkg='sudo pkg'
-alias	apt='sudo pkg'
 alias	reboot='sudo reboot'
-alias	portmaster='sudo portmaster'
 alias	service='sudo service'
-alias	freebsd-update='sudo freebsd-update'
 
-# not to be disturbed by ctrl-s ctrl-q while using terminals:
-stty -ixon
+case $OSTYPE in
+  linux*)
+    alias	ll='ls -lhAF --color'
+    alias	s='sudo '  # trailing space: also expand an alias after it, e.g. 's ll'
+    alias	ups='upsc ups@localhost'
+    alias	logg='sudo tail -f'
+    alias	upgrade='apt update && apt upgrade -y'
+
+    # sudo shortcuts
+    alias	apt='sudo apt'
+    alias	dpkg='sudo dpkg'
+    ;;
+  freebsd*)
+    alias	p='cd /usr/ports && cd'  # use it like "p www/firefox"
+    alias	gnugrep='/usr/local/bin/grep --color'
+    alias	ls='ls -FG'
+    alias	ll='ls -lhTAF'
+    alias	stat='stat -x'
+    alias	cputemp='sysctl -a | grep "dev.cpu.*.temperature"'
+    alias	logg='tail -f'
+    alias	netscan='nmap -v -sn -n "$SUBNET" -oG - | awk '\''/Status: Down/{print $2}'\'
+
+    # iocage shortcuts
+    alias	iolist='iocage list -l'
+    alias	iopkg='sudo iocage exec ALL pkg upgrade'
+    alias	ioupdate='sudo iocage update ALL'
+    alias	ioautoremove='sudo iocage exec ALL "pkg autoremove"'
+
+    # sudo shortcuts
+    alias	scat='sudo cat'
+    alias	ss='sudo su'
+    alias	pkg='sudo pkg'
+    alias	apt='sudo pkg'
+    alias	portmaster='sudo portmaster'
+    alias	freebsd-update='sudo freebsd-update'
+
+    # not to be disturbed by ctrl-s ctrl-q while using terminals:
+    stty -ixon
+    ;;
+esac
+
+# ---- Linux shell functions ----
+if [[ $OSTYPE == linux* ]]; then
+
+  # systemctl runs with sudo, except for --user, which must run as you
+  systemctl() {
+    if (( ${argv[(Ie)--user]} )); then
+      command systemctl "$@"
+    else
+      sudo systemctl "$@"
+    fi
+  }
+
+  # plain 'ps' shows full format (-f); with options, run them as given
+  # (an alias would turn 'ps aux' into 'ps -f aux', mixing option styles)
+  ps() {
+    if (( $# )); then
+      command ps "$@"
+    else
+      command ps -f
+    fi
+  }
+
+  # snapremove [-r] <dataset>
+  #   Destroy ALL snapshots of <dataset>. With -r, also every dataset beneath it.
+  #   Shows counts and space to reclaim, then asks before deleting.
+  snapremove() {
+    local recurse=0 ds list d first last n ranges="" ans r
+    [ "$1" = "-r" ] && { recurse=1; shift; }
+    ds="${1%/}"
+    [ -n "$ds" ] || { echo "usage: snapremove [-r] <dataset>"; return 1; }
+    case "$ds" in *@*) echo "pass a dataset, not a snapshot"; return 1;; esac
+    zfs list -H -o name "$ds" >/dev/null 2>&1 || { echo "no such dataset: $ds"; return 1; }
+
+    if [ "$recurse" = 1 ]; then list=$(zfs list -H -o name -r "$ds"); else list="$ds"; fi
+
+    echo "Would destroy:"
+    while read -r d; do
+      first=$(zfs list -H -t snapshot -o name -s creation -d 1 "$d" | head -1 | cut -d@ -f2)
+      [ -n "$first" ] || continue
+      last=$(zfs list -H -t snapshot -o name -s creation -d 1 "$d" | tail -1 | cut -d@ -f2)
+      n=$(zfs list -H -t snapshot -o name -d 1 "$d" | wc -l | tr -d ' ')
+      echo "  $d: $n snapshot(s), $(sudo zfs destroy -nv "$d@$first%$last" | tail -1)"
+      ranges+="$d@$first%$last"$'\n'
+    done <<< "$list"
+
+    [ -n "$ranges" ] || { echo "  (no snapshots found)"; return 0; }
+    printf "Destroy all of these? [y/N] "
+    read -r ans
+    case "$ans" in y|Y) ;; *) echo "cancelled"; return 1;; esac
+    printf '%s' "$ranges" | while read -r r; do
+      [ -n "$r" ] && sudo zfs destroy -v "$r"
+    done
+  }
+
+fi
