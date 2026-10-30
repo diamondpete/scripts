@@ -284,6 +284,41 @@ case $OSTYPE in
     ;;
 esac
 
+# ---- shell functions ----
+
+# snapremove [-r] <dataset>
+#   Destroy ALL snapshots of <dataset>. With -r, also every dataset beneath it.
+#   Shows counts and space to reclaim, then asks before deleting.
+#   Uses only OpenZFS and POSIX tools, so it works on Linux and FreeBSD.
+snapremove() {
+  local recurse=0 ds list d first last n ranges="" ans r
+  [ "$1" = "-r" ] && { recurse=1; shift; }
+  ds="${1%/}"
+  [ -n "$ds" ] || { echo "usage: snapremove [-r] <dataset>"; return 1; }
+  case "$ds" in *@*) echo "pass a dataset, not a snapshot"; return 1;; esac
+  zfs list -H -o name "$ds" >/dev/null 2>&1 || { echo "no such dataset: $ds"; return 1; }
+
+  if [ "$recurse" = 1 ]; then list=$(zfs list -H -o name -r "$ds"); else list="$ds"; fi
+
+  echo "Would destroy:"
+  while read -r d; do
+    first=$(zfs list -H -t snapshot -o name -s creation -d 1 "$d" | head -1 | cut -d@ -f2)
+    [ -n "$first" ] || continue
+    last=$(zfs list -H -t snapshot -o name -s creation -d 1 "$d" | tail -1 | cut -d@ -f2)
+    n=$(zfs list -H -t snapshot -o name -d 1 "$d" | wc -l | tr -d ' ')
+    echo "  $d: $n snapshot(s), $(sudo zfs destroy -nv "$d@$first%$last" | tail -1)"
+    ranges+="$d@$first%$last"$'\n'
+  done <<< "$list"
+
+  [ -n "$ranges" ] || { echo "  (no snapshots found)"; return 0; }
+  printf "Destroy all of these? [y/N] "
+  read -r ans
+  case "$ans" in y|Y) ;; *) echo "cancelled"; return 1;; esac
+  printf '%s' "$ranges" | while read -r r; do
+    [ -n "$r" ] && sudo zfs destroy -v "$r"
+  done
+}
+
 # ---- Linux shell functions ----
 if [[ $OSTYPE == linux* ]]; then
 
@@ -304,38 +339,6 @@ if [[ $OSTYPE == linux* ]]; then
     else
       command ps -f
     fi
-  }
-
-  # snapremove [-r] <dataset>
-  #   Destroy ALL snapshots of <dataset>. With -r, also every dataset beneath it.
-  #   Shows counts and space to reclaim, then asks before deleting.
-  snapremove() {
-    local recurse=0 ds list d first last n ranges="" ans r
-    [ "$1" = "-r" ] && { recurse=1; shift; }
-    ds="${1%/}"
-    [ -n "$ds" ] || { echo "usage: snapremove [-r] <dataset>"; return 1; }
-    case "$ds" in *@*) echo "pass a dataset, not a snapshot"; return 1;; esac
-    zfs list -H -o name "$ds" >/dev/null 2>&1 || { echo "no such dataset: $ds"; return 1; }
-
-    if [ "$recurse" = 1 ]; then list=$(zfs list -H -o name -r "$ds"); else list="$ds"; fi
-
-    echo "Would destroy:"
-    while read -r d; do
-      first=$(zfs list -H -t snapshot -o name -s creation -d 1 "$d" | head -1 | cut -d@ -f2)
-      [ -n "$first" ] || continue
-      last=$(zfs list -H -t snapshot -o name -s creation -d 1 "$d" | tail -1 | cut -d@ -f2)
-      n=$(zfs list -H -t snapshot -o name -d 1 "$d" | wc -l | tr -d ' ')
-      echo "  $d: $n snapshot(s), $(sudo zfs destroy -nv "$d@$first%$last" | tail -1)"
-      ranges+="$d@$first%$last"$'\n'
-    done <<< "$list"
-
-    [ -n "$ranges" ] || { echo "  (no snapshots found)"; return 0; }
-    printf "Destroy all of these? [y/N] "
-    read -r ans
-    case "$ans" in y|Y) ;; *) echo "cancelled"; return 1;; esac
-    printf '%s' "$ranges" | while read -r r; do
-      [ -n "$r" ] && sudo zfs destroy -v "$r"
-    done
   }
 
 fi
