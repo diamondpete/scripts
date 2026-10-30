@@ -6,7 +6,7 @@
 # loaded last so it can override anything here. See zshrc.local.example.
 
 # ---- settings (override in ~/.zshrc.local) ----
-SUBNET='10.0.0.0/24'            # network scanned by 'netscan' (FreeBSD)
+SUBNET='10.0.0.0/24'            # network scanned by 'netscan'
 
 # start tmux with shell
 #[[ -z $TMUX ]] && exec tmux
@@ -235,6 +235,10 @@ alias	du='du -h'
 alias	mkdir='mkdir -p'
 alias	tkill='tmux kill-session -t'
 
+# free IPs in $SUBNET: addresses that don't answer a ping scan
+# (sudo lets nmap use ARP, so firewalled hosts still count as up)
+alias	netscan='sudo nmap -v -sn -n "$SUBNET" -oG - | awk '\''/Status: Down/{print $2}'\'
+
 # sudo shortcuts
 alias	chown='sudo chown'
 alias	chmod='sudo chmod'
@@ -263,7 +267,6 @@ case $OSTYPE in
     alias	stat='stat -x'
     alias	cputemp='sysctl -a | grep "dev.cpu.*.temperature"'
     alias	logg='tail -f'
-    alias	netscan='nmap -v -sn -n "$SUBNET" -oG - | awk '\''/Status: Down/{print $2}'\'
 
     # iocage shortcuts
     alias	iolist='iocage list -l'
