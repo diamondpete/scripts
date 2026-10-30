@@ -8,18 +8,23 @@ export EDITOR='vi'
 export SYSTEMD_EDITOR='vi'
 export PAGER='less'
 export LESS='-giAMR'
-export LESSOPEN='| lesspipe.sh %s'
+# Debian/Ubuntu name the less preprocessor 'lesspipe' (elsewhere it's 'lesspipe.sh')
+if (( $+commands[lesspipe] )); then
+	export LESSOPEN='| lesspipe %s'
+elif (( $+commands[lesspipe.sh] )); then
+	export LESSOPEN='| lesspipe.sh %s'
+fi
 export GREP_COLORS='mt=1;31'
 export LS_COLORS='di=32:ln=35:so=33:pi=31:ex=34:bd=34;40:cd=35;40:su=30;42:sg=37;42:tw=30;46:ow=31;46'
 export LSCOLORS='cxfxdxbxexeafaachcagbg'
 export CLICOLOR='1'
-export PATH="${PATH}:/home/user/.local/bin"
-export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/usr/lib/x86_64-linux-gnu"
+export PATH="${PATH}:$HOME/.local/bin"
 export XAUTHORITY=~/.Xauthority
 
 PROMPT='%B%F{green}%n@%m:%/%f%b%#'
 HISTFILE=$HOME/.zhistory
-HISTSIZE=SAVEHIST=100000
+HISTSIZE=100000                 # lines kept in memory
+SAVEHIST=100000                 # lines saved to $HISTFILE
 LISTMAX=999
 
 setopt notify                   # report the status of background jobs immediately
@@ -28,13 +33,10 @@ setopt auto_cd                  # if the command is the name of a directory, per
 setopt auto_list                # automatically list choices on an ambiguous completion
 setopt auto_continue            # unsuspend suspended jobs on `disown' command
 setopt chase_links              # resolve symlink to its real value when cd into it
-setopt append_history           # append history to the history file, rather than replace it
 setopt inc_append_history       # history lines are added to the $HISTFILE as soon as they are entered
 setopt extended_history         # save command beginning timestamp and the duration
 setopt hist_reduce_blanks       # remove superfluous blanks from history
-setopt hist_ignore_dups         # do not save history line if it duplicates previous history event
 setopt hist_ignore_all_dups     # if new command duplicates an older one, remove the older from history
-setopt hist_expire_dups_first   # when delete duplicates in history, delete oldest history event
 setopt hist_save_no_dups        # when writing history, older commands that duplicate newer ones are omitted
 setopt hist_ignore_space        # do not save line to the history list when first character is a space
 setopt hist_verify              # perform history expansion and reload the line into the editing buffer
@@ -74,7 +76,6 @@ if [[ $OSTYPE = freebsd* ]]; then
 zstyle ':completion:*:kill:*'   command "ps -U $USER"; else
 zstyle ':completion:*:kill:*'   command "ps -u $USER"; fi
 autoload -U select-word-style; select-word-style b
-zstyle ':zle:*' word-chars "*?_-.[]~"
 
 # select emacs keymap
 bindkey -e
@@ -140,7 +141,6 @@ zle -N _tcsh_autolist
 bindkey '\CI' _tcsh_autolist
 
 # ctrl+b - return to previous dir
-setopt auto_pushd ; setopt pushd_ignore_dups
 _back() { pushd +1 &> /dev/null && zle reset-prompt && zle -M "dirs: $(dirs)" }
 zle -N _back
 bindkey '\Cb' _back
@@ -171,20 +171,26 @@ zle -N _del_first_char
 bindkey "\e[3;5~" _del_first_char
 bindkey "\e[3^" _del_first_char
 
-# to use these two functions x11/xclip installation is required
+# copy the current line with xclip, which needs an X display (not plain SSH).
+# print -rn copies the line exactly; echo would turn \n, \t etc. into real ones.
+_xclip_copy() {  # $1 = clipboard | primary
+  [[ -n $BUFFER ]] || return
+  if (( ! $+commands[xclip] )) || [[ -z $DISPLAY ]]; then
+    zle -M ' copy needs xclip and an X display'
+  elif print -rn -- "$BUFFER" | xclip -in -selection $1 &> /dev/null; then
+    zle -M " copied to ${(U)1}"
+  else
+    zle -M ' copy failed'
+  fi
+}
+
 # alt+c - copy current line to CLIPBOARD
-_clipcopy() { if [[ ! -z $BUFFER ]]
-        then builtin echo -n $BUFFER |\
-        xclip -in -selection clipboard &> /dev/null &&\
-        zle -M ' copied to CLIPBOARD'; fi }
+_clipcopy() { _xclip_copy clipboard }
 zle -N _clipcopy
 bindkey "\ec" _clipcopy
 
 # ctrl+insert - copy current line to PRIMARY
-_primcopy() { if [[ ! -z $BUFFER ]]
-        then builtin echo -n $BUFFER |\
-        xclip -in -selection primary &> /dev/null &&\
-        zle -M ' copied to PRIMARY'; fi }
+_primcopy() { _xclip_copy primary }
 zle -N _primcopy
 bindkey "\e[2;5~" _primcopy
 bindkey "\e[2^" _primcopy
@@ -193,7 +199,6 @@ bindkey "\e[2^" _primcopy
 alias	c='cat'
 alias	r='readlink -f'
 alias	history='fc -l -E 1'
-alias	.='pwd'
 alias	...='../..'
 alias	....='../../..'
 alias	.....='../../../..'
@@ -203,23 +208,20 @@ alias	l='less'
 alias	la='ls -a'
 alias	ll='ls -lhAF --color'
 alias	rm='rm -I'
-alias	g='grep -i'
 alias	v='vi'
 alias	e='builtin echo'
 alias	du='du -h'
 alias	mkdir='mkdir -p'
-alias s='sudo'
+alias	s='sudo '  # trailing space: also expand an alias after it, e.g. 's ll'
 alias	tkill='tmux kill-session -t'
 alias	ups='upsc ups@localhost'
 alias	logg='sudo tail -f'
-alias	ps='ps -f'
 alias	upgrade='apt update && apt upgrade -y'
 
 # sudo alias
 alias	chown='sudo chown'
 alias	chmod='sudo chmod'
 alias	service='sudo service'
-alias	systemctl='sudo systemctl'
 alias	svi='sudo vi'
 alias	apt='sudo apt'
 alias	dpkg='sudo dpkg'
@@ -227,6 +229,25 @@ alias	reboot='sudo reboot'
 alias	srm='sudo rm'
 
 # Shell Functions
+
+# systemctl runs with sudo, except for --user, which must run as you
+systemctl() {
+  if (( ${argv[(Ie)--user]} )); then
+    command systemctl "$@"
+  else
+    sudo systemctl "$@"
+  fi
+}
+
+# plain 'ps' shows full format (-f); with options, run them as given
+# (an alias would turn 'ps aux' into 'ps -f aux', mixing option styles)
+ps() {
+  if (( $# )); then
+    command ps "$@"
+  else
+    command ps -f
+  fi
+}
 
 # snapremove [-r] <dataset>
 #   Destroy ALL snapshots of <dataset>. With -r, also every dataset beneath it.
