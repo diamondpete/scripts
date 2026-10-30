@@ -268,12 +268,6 @@ case $OSTYPE in
     alias	cputemp='sysctl -a | grep "dev.cpu.*.temperature"'
     alias	logg='tail -f'
 
-    # iocage shortcuts
-    alias	iolist='iocage list -l'
-    alias	iopkg='sudo iocage exec ALL pkg upgrade'
-    alias	ioupdate='sudo iocage update ALL'
-    alias	ioautoremove='sudo iocage exec ALL "pkg autoremove"'
-
     # sudo shortcuts
     alias	scat='sudo cat'
     alias	ss='sudo su'
