@@ -317,20 +317,18 @@ _snap_names() {
 
 # snaplist [-r] <dataset>
 #   List the snapshots of <dataset>, oldest first, with their space and date.
-#   With -r, also those of every dataset beneath it, one table per dataset.
+#   With -r, also those of every dataset beneath it, grouped by dataset in one
+#   table (column lines it up, since each zfs call sizes its own columns).
 snaplist() {
-  local list d out found=0
+  local list d rows
   list=$(_snap_datasets snaplist "$@") || return 1
 
-  while read -r d; do
-    out=$(zfs list -t snapshot -o name,used,refer,creation -s creation -d 1 "$d" 2>/dev/null)
-    [ -n "$out" ] || continue
-    [ "$found" = 1 ] && echo
-    found=1
-    printf '%s\n' "$out"
-  done <<< "$list"
+  rows=$(while read -r d; do
+    zfs list -H -t snapshot -o name,used,refer,creation -s creation -d 1 "$d" 2>/dev/null
+  done <<< "$list")
 
-  [ "$found" = 1 ] || echo "no snapshots found"
+  [ -n "$rows" ] || { echo "no snapshots found"; return 0; }
+  printf 'NAME\tUSED\tREFER\tCREATION\n%s\n' "$rows" | column -t -s $'\t'
 }
 
 # snapremove [-r] <dataset>
