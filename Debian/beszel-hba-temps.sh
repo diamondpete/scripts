@@ -11,7 +11,7 @@ for c in 1 2; do
   t=$(arcconf getconfig $c AD 2>/dev/null | awk -F: '/Temperature/{print $2+0; exit}')
   d="$ROOT/hwmon-hba$c"
   # No reading: drop the old value so Beszel doesn't keep showing it as current
-  if [ -z "$t" ]; then
+  if [ -z "$t" ] || [ "$t" -le 0 ]; then
     rm -f "$d/temp1_input"
     continue
   fi
