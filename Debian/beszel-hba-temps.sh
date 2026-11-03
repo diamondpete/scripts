@@ -9,8 +9,12 @@ done
 # Add each Adaptec controller's temperature (millidegrees C)
 for c in 1 2; do
   t=$(arcconf getconfig $c AD 2>/dev/null | awk -F: '/Temperature/{print $2+0; exit}')
-  [ -n "$t" ] || continue
   d="$ROOT/hwmon-hba$c"
+  # No reading: drop the old value so Beszel doesn't keep showing it as current
+  if [ -z "$t" ]; then
+    rm -f "$d/temp1_input"
+    continue
+  fi
   mkdir -p "$d"
   echo "hba$c" > "$d/name"
   echo $((t * 1000)) > "$d/temp1_input.tmp" && mv "$d/temp1_input.tmp" "$d/temp1_input"
