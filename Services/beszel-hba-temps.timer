@@ -1,0 +1,9 @@
+[Unit]
+Description=Update Adaptec HBA temps for Beszel
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+
+[Install]
+WantedBy=timers.target

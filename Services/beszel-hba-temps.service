@@ -1,0 +1,6 @@
+[Unit]
+Description=Export Adaptec HBA temps for Beszel
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/beszel-hba-temps.sh
