@@ -15,6 +15,8 @@
 | `FreeBSD/port-test` | Build a port and its test dependencies in a poudriere jail |
 | `FreeBSD/pkg-update-push` | Report pending package updates on the host and its running jails to an Uptime Kuma push monitor; install to `/usr/local/sbin` |
 | `FreeBSD/pkg-update-push.conf` | Template for the monitor's host, port and token, installed as `/usr/local/etc/pkg-update-push.conf` (the real values are not kept in git) |
+| `Windows/windows-update-push.ps1` | Report pending Windows Update and winget updates to an Uptime Kuma push monitor |
+| `Windows/windows-update-push.conf` | Template for the monitor's host, port and token, installed as `C:\ProgramData\windows-update-push.conf` (the real values are not kept in git) |
 | `ZSH/.zshrc` | zsh config for Linux and FreeBSD; copy to `~/.zshrc` |
 | `ZSH/zshrc.local.example` | Template for `~/.zshrc.local`, the per-machine file for private aliases and setting overrides (not kept in git) |
 
