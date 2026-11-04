@@ -3,7 +3,8 @@
 # included) to an Uptime Kuma push monitor. The monitor goes down when updates
 # are waiting or a check fails. Stopped iocage jails can't be checked, so they
 # are only counted. FreeBSD base updates are not covered.
-# The message names each system with pending updates and its packages.
+# The message names each system with pending updates or vulnerable packages,
+# along with those packages, and the stopped jails.
 #
 # The monitor's host, port and token are read from
 # /usr/local/etc/pkg-update-push.conf.
@@ -39,6 +40,12 @@ add_detail()
 	details="${details} | $1"
 }
 
+# join_names: turn one name per line into a comma-separated list
+join_names()
+{
+	paste -sd , - | sed 's/,/, /g'
+}
+
 # check <label> [pkg options]: add one system's pending updates and vulnerable packages
 check()
 {
@@ -54,9 +61,15 @@ check()
 		count=$(echo "$pending" | wc -l | tr -d ' ')
 		updates=$((updates + count))
 		# Package names without their versions, to keep the message short
-		add_detail "${label} (${count}): $(echo "$pending" | sed 's/-[^-]*$//' | paste -sd , - | sed 's/,/, /g')"
+		add_detail "${label} (${count}): $(echo "$pending" | sed 's/-[^-]*$//' | join_names)"
 	fi
-	vulnerable=$((vulnerable + $(pkg "$@" audit -Fq 2>/dev/null | wc -l)))
+	# audit exits non-zero when it finds something
+	flagged=$(pkg "$@" audit -Fq 2>/dev/null || true)
+	if [ -n "$flagged" ]; then
+		count=$(echo "$flagged" | wc -l | tr -d ' ')
+		vulnerable=$((vulnerable + count))
+		add_detail "${label} vulnerable (${count}): $(echo "$flagged" | sed 's/-[^-]*$//' | join_names)"
+	fi
 }
 
 check "$(hostname -s)"
@@ -64,7 +77,12 @@ for jail in $(jls name); do
 	check "${jail#ioc-}" -j "$jail"
 done
 
-stopped=$(iocage list -h 2>/dev/null | awk '/\tdown\t/ { c++ } END { print c + 0 }')
+stopped=0
+down_jails=$(iocage list -h 2>/dev/null | awk -F '\t' '/\tdown\t/ { print $2 }')
+if [ -n "$down_jails" ]; then
+	stopped=$(echo "$down_jails" | wc -l | tr -d ' ')
+	add_detail "stopped (${stopped}): $(echo "$down_jails" | join_names)"
+fi
 
 status=down
 if [ "$updates" -eq 0 ] && [ "$failed" -eq 0 ]; then
