@@ -8,13 +8,22 @@
 # /usr/local/etc/pkg-update-push.conf.
 # Run it from root's crontab, for example every 6 hours:
 #   0 */6 * * * /usr/local/sbin/pkg-update-push
+#
+# -n  Dry run: print the status and message instead of sending them
 set -eu
 
 # cron's default PATH lacks /usr/sbin and /usr/local/bin
 PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
 
 CONF=/usr/local/etc/pkg-update-push.conf
-. "$CONF"
+
+dryrun=no
+while getopts n opt; do
+	case ${opt} in
+	n)	dryrun=yes ;;
+	*)	echo "usage: $(basename "$0") [-n]" >&2; exit 2 ;;
+	esac
+done
 
 updates=0
 vulnerable=0
@@ -43,4 +52,12 @@ if [ "$updates" -eq 0 ] && [ "$failed" -eq 0 ]; then
 	status=up
 fi
 
-fetch -qo /dev/null "http://${PUSH_HOST}:${PUSH_PORT}/api/push/${PUSH_TOKEN}?status=${status}&msg=${updates}%20updates,%20${vulnerable}%20vulnerable,%20${failed}%20failed,%20${stopped}%20stopped"
+message="${updates} updates, ${vulnerable} vulnerable, ${failed} failed, ${stopped} stopped"
+
+if [ "$dryrun" = yes ]; then
+	echo "${status}: ${message}"
+	exit 0
+fi
+
+. "$CONF"
+fetch -qo /dev/null "http://${PUSH_HOST}:${PUSH_PORT}/api/push/${PUSH_TOKEN}?status=${status}&msg=$(echo "$message" | sed 's/ /%20/g')"
