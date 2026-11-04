@@ -13,6 +13,8 @@
 | `Services/beszel-hba-temps.*` | systemd service and timer that run `beszel-hba-temps.sh` every minute |
 | `FreeBSD/rpoudriere` | Update poudriere ports trees, reapply patches, bulk build |
 | `FreeBSD/port-test` | Build a port and its test dependencies in a poudriere jail |
+| `FreeBSD/pkg-update-push` | Report pending package updates on the host and its running jails to an Uptime Kuma push monitor; install to `/usr/local/sbin` |
+| `FreeBSD/pkg-update-push.conf` | Template for the monitor's host, port and token, installed as `/usr/local/etc/pkg-update-push.conf` (the real values are not kept in git) |
 | `ZSH/.zshrc` | zsh config for Linux and FreeBSD; copy to `~/.zshrc` |
 | `ZSH/zshrc.local.example` | Template for `~/.zshrc.local`, the per-machine file for private aliases and setting overrides (not kept in git) |
 

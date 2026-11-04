@@ -1,0 +1,46 @@
+#!/bin/sh
+# Report pending package updates on this host and its running jails (iocage
+# included) to an Uptime Kuma push monitor. The monitor goes down when updates
+# are waiting or a check fails. Stopped iocage jails can't be checked, so they
+# are only counted. FreeBSD base updates are not covered.
+#
+# The monitor's host, port and token are read from
+# /usr/local/etc/pkg-update-push.conf.
+# Run it from root's crontab, for example every 6 hours:
+#   0 */6 * * * /usr/local/sbin/pkg-update-push
+set -eu
+
+# cron's default PATH lacks /usr/sbin and /usr/local/bin
+PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
+
+CONF=/usr/local/etc/pkg-update-push.conf
+. "$CONF"
+
+updates=0
+vulnerable=0
+failed=0
+
+# check [pkg options]: add one system's pending updates and vulnerable packages
+check()
+{
+	if ! pkg "$@" update -q >/dev/null 2>&1; then
+		failed=$((failed + 1))
+		return 0
+	fi
+	updates=$((updates + $(pkg "$@" version -qvRL= | wc -l)))
+	vulnerable=$((vulnerable + $(pkg "$@" audit -Fq 2>/dev/null | wc -l)))
+}
+
+check
+for jail in $(jls name); do
+	check -j "$jail"
+done
+
+stopped=$(iocage list -h 2>/dev/null | awk '/\tdown\t/ { c++ } END { print c + 0 }')
+
+status=down
+if [ "$updates" -eq 0 ] && [ "$failed" -eq 0 ]; then
+	status=up
+fi
+
+fetch -qo /dev/null "http://${PUSH_HOST}:${PUSH_PORT}/api/push/${PUSH_TOKEN}?status=${status}&msg=${updates}%20updates,%20${vulnerable}%20vulnerable,%20${failed}%20failed,%20${stopped}%20stopped"
