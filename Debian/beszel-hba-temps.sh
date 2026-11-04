@@ -3,6 +3,7 @@
 # the real sensors, plus the CPU, NVMe drives and Adaptec controllers under names
 # that say what they are. Names are worked out here at run time:
 #   cpu                             package reading only, not one line per core
+#   nic                             network chip's PHY reading, if it has one
 #   <owner>_nvme_a, <owner>_nvme_b  mirror pair, one Composite reading per drive
 #   <vm>_tank                       Adaptec controller, else hba<number>
 # <owner> is the Proxmox VM whose config lists the drive's serial, else this host.
@@ -22,6 +23,19 @@ vm_of() {
 # has_name <sensor name> <hwmon path>
 has_name() {
   grep -qx "$1" "$2/name" 2>/dev/null
+}
+
+# find_label <hwmon path> <pattern>: print the first label file that matches
+find_label() {
+  grep -l "$2" "$1"/temp*_label 2>/dev/null | head -n 1
+}
+
+# link_sensor <sensor name> <input file>: expose one live reading under a new name
+link_sensor() {
+  d="$ROOT/hwmon-$1"
+  mkdir -p "$d"
+  [ -s "$d/name" ] || echo "$1" > "$d/name"
+  ln -sfn "$(readlink -f "$2")" "$d/temp1_input"
 }
 
 # Print "<sensor name> <hwmon path>" for each NVMe drive. Sorting by serial keeps
@@ -52,32 +66,29 @@ hba_name() {
     }
 }
 
-# Mirror the real sensors so Beszel keeps seeing the NIC/etc.
+# Mirror the other real sensors so Beszel keeps seeing them
 for h in /sys/class/hwmon/hwmon*; do
-  if has_name nvme "$h" || has_name coretemp "$h"; then
+  if has_name nvme "$h" || has_name coretemp "$h" || [ -n "$(find_label "$h" '^PHY Temperature$')" ]; then
     rm -f "$ROOT/${h##*/}"
   else
     ln -sfn "$(readlink -f "$h")" "$ROOT/${h##*/}"
   fi
 done
 
-# The CPU package reading, which follows the hottest core, linked so it stays live
 for h in /sys/class/hwmon/hwmon*; do
-  has_name coretemp "$h" || continue
-  label=$(grep -l '^Package id' "$h"/temp*_label 2>/dev/null | head -n 1)
-  [ -n "$label" ] || continue
-  d="$ROOT/hwmon-cpu"
-  mkdir -p "$d"
-  [ -s "$d/name" ] || echo cpu > "$d/name"
-  ln -sfn "$(readlink -f "${label%_label}_input")" "$d/temp1_input"
+  # The CPU package reading, which follows the hottest core
+  if has_name coretemp "$h"; then
+    label=$(find_label "$h" '^Package id')
+    [ -z "$label" ] || link_sensor cpu "${label%_label}_input"
+  fi
+  # The network chip's PHY reading (its MAC reading shows the same value)
+  label=$(find_label "$h" '^PHY Temperature$')
+  [ -z "$label" ] || link_sensor nic "${label%_label}_input"
 done
 
-# Each NVMe drive's Composite reading (temp1), linked so it stays live
+# Each NVMe drive's Composite reading (temp1)
 nvme_list | while read -r name h; do
-  d="$ROOT/hwmon-$name"
-  mkdir -p "$d"
-  [ -s "$d/name" ] || echo "$name" > "$d/name"
-  ln -sfn "$(readlink -f "$h/temp1_input")" "$d/temp1_input"
+  link_sensor "$name" "$h/temp1_input"
 done
 
 # Add each Adaptec controller's temperature (millidegrees C)
