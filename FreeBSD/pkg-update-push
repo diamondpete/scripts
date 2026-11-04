@@ -3,19 +3,22 @@
 # included) to an Uptime Kuma push monitor. The monitor goes down when updates
 # are waiting or a check fails. Stopped iocage jails can't be checked, so they
 # are only counted. FreeBSD base updates are not covered.
+# The message names each system with pending updates and its packages.
 #
 # The monitor's host, port and token are read from
 # /usr/local/etc/pkg-update-push.conf.
 # Run it from root's crontab, for example every 6 hours:
 #   0 */6 * * * /usr/local/sbin/pkg-update-push
 #
-# -n  Dry run: print the status and message instead of sending them
+# -n  Dry run: print the status and the full list instead of sending them
 set -eu
 
 # cron's default PATH lacks /usr/sbin and /usr/local/bin
 PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
 
 CONF=/usr/local/etc/pkg-update-push.conf
+# Longer messages are cut off, since the message travels in the URL
+MAX_MESSAGE=1800
 
 dryrun=no
 while getopts n opt; do
@@ -28,21 +31,37 @@ done
 updates=0
 vulnerable=0
 failed=0
+details=
 
-# check [pkg options]: add one system's pending updates and vulnerable packages
+# add_detail <text>: add one system's line to the message
+add_detail()
+{
+	details="${details} | $1"
+}
+
+# check <label> [pkg options]: add one system's pending updates and vulnerable packages
 check()
 {
+	label=$1
+	shift
 	if ! pkg "$@" update -q >/dev/null 2>&1; then
 		failed=$((failed + 1))
+		add_detail "${label}: check failed"
 		return 0
 	fi
-	updates=$((updates + $(pkg "$@" version -qvRL= | wc -l)))
+	pending=$(pkg "$@" version -qRl '<' | awk '{ print $1 }')
+	if [ -n "$pending" ]; then
+		count=$(echo "$pending" | wc -l | tr -d ' ')
+		updates=$((updates + count))
+		# Package names without their versions, to keep the message short
+		add_detail "${label} (${count}): $(echo "$pending" | sed 's/-[^-]*$//' | paste -sd , - | sed 's/,/, /g')"
+	fi
 	vulnerable=$((vulnerable + $(pkg "$@" audit -Fq 2>/dev/null | wc -l)))
 }
 
-check
+check "$(hostname -s)"
 for jail in $(jls name); do
-	check -j "$jail"
+	check "${jail#ioc-}" -j "$jail"
 done
 
 stopped=$(iocage list -h 2>/dev/null | awk '/\tdown\t/ { c++ } END { print c + 0 }')
@@ -52,12 +71,16 @@ if [ "$updates" -eq 0 ] && [ "$failed" -eq 0 ]; then
 	status=up
 fi
 
-message="${updates} updates, ${vulnerable} vulnerable, ${failed} failed, ${stopped} stopped"
+message="${updates} updates, ${vulnerable} vulnerable, ${failed} failed, ${stopped} stopped${details}"
 
 if [ "$dryrun" = yes ]; then
-	echo "${status}: ${message}"
+	echo "${status}: ${message}" | awk '{ gsub(/ \| /, "\n"); print }'
 	exit 0
 fi
 
+if [ "${#message}" -gt "$MAX_MESSAGE" ]; then
+	message="$(printf '%s' "$message" | cut -c "1-$MAX_MESSAGE")... (run with -n for the full list)"
+fi
+
 . "$CONF"
-fetch -qo /dev/null "http://${PUSH_HOST}:${PUSH_PORT}/api/push/${PUSH_TOKEN}?status=${status}&msg=$(echo "$message" | sed 's/ /%20/g')"
+fetch -qo /dev/null "http://${PUSH_HOST}:${PUSH_PORT}/api/push/${PUSH_TOKEN}?status=${status}&msg=$(echo "$message" | sed 's/%/%25/g; s/ /%20/g; s/+/%2B/g; s/&/%26/g; s/#/%23/g; s/|/%7C/g')"
