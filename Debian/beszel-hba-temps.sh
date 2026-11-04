@@ -1,7 +1,8 @@
 #!/bin/sh
 # Build the sensor folder the Beszel agent reads (SYS_SENSORS=/run/beszel-sys):
-# the real sensors, plus NVMe drives and Adaptec controllers under names that
-# say what they belong to. Names are worked out here at run time:
+# the real sensors, plus the CPU, NVMe drives and Adaptec controllers under names
+# that say what they are. Names are worked out here at run time:
+#   cpu                             package reading only, not one line per core
 #   <owner>_nvme_a, <owner>_nvme_b  mirror pair, one Composite reading per drive
 #   <vm>_tank                       Adaptec controller, else hba<number>
 # <owner> is the Proxmox VM whose config lists the drive's serial, else this host.
@@ -18,15 +19,16 @@ vm_of() {
   [ -z "$conf" ] || sed -n '/^\[/q; s/^name: *//p' "$conf"
 }
 
-is_nvme() {
-  grep -qx nvme "$1/name" 2>/dev/null
+# has_name <sensor name> <hwmon path>
+has_name() {
+  grep -qx "$1" "$2/name" 2>/dev/null
 }
 
 # Print "<sensor name> <hwmon path>" for each NVMe drive. Sorting by serial keeps
 # each drive on the same letter between boots, unlike the nvmeN numbers.
 nvme_list() {
   for h in /sys/class/hwmon/hwmon*; do
-    is_nvme "$h" || continue
+    has_name nvme "$h" || continue
     serial=$(tr -d ' ' < "$h/device/serial")
     owner=$(vm_of "$serial")
     printf '%s %s %s\n' "${owner:-$(hostname -s)}_nvme" "$serial" "$h"
@@ -50,13 +52,24 @@ hba_name() {
     }
 }
 
-# Mirror the real sensors so Beszel keeps seeing CPU/NIC/etc.
+# Mirror the real sensors so Beszel keeps seeing the NIC/etc.
 for h in /sys/class/hwmon/hwmon*; do
-  if is_nvme "$h"; then
+  if has_name nvme "$h" || has_name coretemp "$h"; then
     rm -f "$ROOT/${h##*/}"
   else
     ln -sfn "$(readlink -f "$h")" "$ROOT/${h##*/}"
   fi
+done
+
+# The CPU package reading, which follows the hottest core, linked so it stays live
+for h in /sys/class/hwmon/hwmon*; do
+  has_name coretemp "$h" || continue
+  label=$(grep -l '^Package id' "$h"/temp*_label 2>/dev/null | head -n 1)
+  [ -n "$label" ] || continue
+  d="$ROOT/hwmon-cpu"
+  mkdir -p "$d"
+  [ -s "$d/name" ] || echo cpu > "$d/name"
+  ln -sfn "$(readlink -f "${label%_label}_input")" "$d/temp1_input"
 done
 
 # Each NVMe drive's Composite reading (temp1), linked so it stays live
