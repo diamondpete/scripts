@@ -2,7 +2,7 @@
 | Path | Purpose |
 | --- | --- |
 | `Debian/nvidia-update` | Update, reinstall, or install a specific NVIDIA driver (signed DKMS module) |
-| `Debian/beszel-hba-temps.sh` | Export Adaptec HBA temperatures for the Beszel agent; install to `/usr/local/sbin` (Proxmox host) |
+| `Debian/beszel-hba-temps.sh` | Export Adaptec HBA and NVMe temperatures for the Beszel agent, named after the VM using each disk; install to `/usr/local/sbin` (Proxmox host) |
 | `Emby/emby-update` | Install the latest (or a given) Emby Server release |
 | `Emby/update-emby-owner` | Switch the Emby service to run as UID 1000; called by `emby-update` |
 | `Plex/plex-update` | Install the latest public (or a given) Plex Media Server release |
