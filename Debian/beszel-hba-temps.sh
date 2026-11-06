@@ -9,7 +9,8 @@
 # <owner> is the Proxmox VM whose config lists the drive's serial, else this host.
 set -eu
 ROOT=/run/beszel-sys/class/hwmon
-VM_CONFIGS=/etc/pve/qemu-server
+PVE=/etc/pve
+VM_CONFIGS=$PVE/qemu-server
 mkdir -p "$ROOT"
 
 # vm_of <serial>: print the name of the VM that uses this disk, if any
@@ -86,10 +87,24 @@ for h in /sys/class/hwmon/hwmon*; do
   [ -z "$label" ] || link_sensor nic "${label%_label}_input"
 done
 
-# Each NVMe drive's Composite reading (temp1)
-nvme_list | while read -r name h; do
-  link_sensor "$name" "$h/temp1_input"
-done
+# Each NVMe drive's Composite reading (temp1). Early in boot the Proxmox config
+# isn't mounted yet, so every drive would be named after this host: wait for a
+# later run instead (.version only exists once it is mounted).
+if [ -d "$PVE" ] && [ ! -e "$PVE/.version" ]; then
+  echo "$PVE not mounted yet, skipping NVMe drives" >&2
+else
+  drives=$(nvme_list)
+  echo "$drives" | while read -r name h; do
+    [ -z "$name" ] || link_sensor "$name" "$h/temp1_input"
+  done
+  # Remove drives that are gone or now have another name (a VM was renamed,
+  # say), so Beszel doesn't show them twice
+  for d in "$ROOT"/hwmon-*_nvme_?; do
+    [ -d "$d" ] || continue
+    echo "$drives" | awk -v n="${d##*/hwmon-}" '$1 == n { found = 1 } END { exit !found }' ||
+      rm -rf "$d"
+  done
+fi
 
 # Add each Adaptec controller's temperature (millidegrees C)
 for c in 1 2; do
